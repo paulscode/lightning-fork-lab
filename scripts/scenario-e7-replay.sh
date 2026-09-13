@@ -66,39 +66,70 @@ mine_b2b 1
 [ "$(b2b getrawtransaction "$txid3" true | jq -r .confirmations)" -ge 1 ] || fail "$txid3 did not confirm"
 pass "wallet-funded PSBT $txid3 confirmed with hash type byte(s) $bytes"
 
-step "E7: a PSBT carrying a legacy signature is refused at finalization"
-# Fund a fresh PSBT and stamp the first input with SIGHASH_ALL, as an external
-# signer that did not opt in would leave it; finalization must refuse.
+step "E7: a template-funded PSBT (coin selection path) opts in too"
+funded=$(lf1 wallet psbt fundtemplate --outputs="{\"$dest\":90000}" --sat_per_vbyte=2 2>/dev/null || lf1 wallet psbt fund --outputs="{\"$dest\":90000}" --sat_per_vbyte=2)
+psbt=$(echo "$funded" | jq -r .psbt)
+finalized=$(lf1 wallet psbt finalize "$psbt")
+rawtx=$(echo "$finalized" | jq -r .final_tx)
+txid4=$(b2b sendrawtransaction "$rawtx")
+bytes=$(witness_opts_in "$txid4")
+mine_b2b 1
+pass "template-funded PSBT $txid4 confirmed with hash type byte(s) $bytes"
+
+step "E7: a PSBT carrying a signature made without the opt-in is refused"
+# Fund and sign, then flip the partial signature's hash type byte to
+# SIGHASH_ALL, as a signer that does not know the chain would have written
+# it; finalization must refuse rather than assemble a replayable transaction.
 funded=$(lf1 wallet psbt fund --outputs="{\"$dest\":110000}" --sat_per_vbyte=2)
 psbt=$(echo "$funded" | jq -r .psbt)
-python3 - "$psbt" > /tmp/e7-legacy.psbt <<'PY'
+signed=$(lf1 wallet psbt sign "$psbt" | jq -r .psbt)
+python3 - "$signed" > /tmp/e7-legacy.psbt <<'PY'
 import base64, sys
 raw = bytearray(base64.b64decode(sys.argv[1]))
-# PSBT_IN_SIGHASH_TYPE is key type 0x03 with a 4-byte LE value; the first
-# input map follows the global map's 0x00 separator.
-i = raw.index(b"\x00", 5)  # end of the global map
-i += 1
-# walk the first input map replacing the sighash record if present
-j = i
-found = False
-while raw[j] != 0:
-    klen = raw[j]; key = raw[j+1:j+1+klen]; j += 1 + klen
-    vlen = raw[j]; j += 1
-    if key[:1] == b"\x03":
-        raw[j:j+4] = (1).to_bytes(4, "little"); found = True
-    j += vlen
-if not found:
-    raise SystemExit("no sighash record in the first input; the wallet did not stamp it")
+assert raw[:5] == b"psbt\xff", "not a PSBT"
+
+def varint(i):
+    b = raw[i]
+    if b < 0xfd:
+        return b, i + 1
+    if b == 0xfd:
+        return int.from_bytes(raw[i+1:i+3], "little"), i + 3
+    if b == 0xfe:
+        return int.from_bytes(raw[i+1:i+5], "little"), i + 5
+    return int.from_bytes(raw[i+1:i+9], "little"), i + 9
+
+def walk(i, on_record):
+    """Walk one key/value map starting at i; return the index after its terminator."""
+    while True:
+        klen, j = varint(i)
+        if klen == 0:
+            return j
+        key = bytes(raw[j:j+klen]); j += klen
+        vlen, j = varint(j)
+        on_record(key, j, vlen)
+        i = j + vlen
+
+i = walk(5, lambda k, v, n: None)  # the global map
+flipped = []
+def flip(key, v, n):
+    if key[:1] == b"\x02":  # PSBT_IN_PARTIAL_SIG
+        raw[v+n-1] = 0x01
+        flipped.append(key)
+walk(i, flip)  # the first input map
+if not flipped:
+    raise SystemExit("no partial signature in the first input")
 print(base64.b64encode(bytes(raw)).decode())
 PY
 legacy=$(cat /tmp/e7-legacy.psbt)
 if out=$(lf1 wallet psbt finalize "$legacy" 2>&1); then
-    fail "a PSBT with a legacy hash type was finalized: $out"
+    fail "a PSBT with a legacy signature was finalized: $out"
 fi
-echo "$out" | grep -q "opt into the unified signature hash" || fail "unexpected refusal: $out"
-pass "finalization refused the legacy hash type: $(echo "$out" | grep -o 'input 0 declares[^;]*' | head -1)"
+echo "$out" | grep -q "does not opt into the unified signature hash" || fail "unexpected refusal: $out"
+pass "finalization refused the legacy signature: $(echo "$out" | grep -o 'input 0: [^;]*' | head -1 | cut -c1-90)"
 # Release the leased inputs so later scenarios can use them.
-lf1 wallet releaseoutput --lock_id="$(echo "$funded" | jq -r '.locked_utxos[0].id')" --outpoint="$(echo "$funded" | jq -r '.locked_utxos[0].outpoint.txid_str'):$(echo "$funded" | jq -r '.locked_utxos[0].outpoint.output_index')" >/dev/null 2>&1 || true
+for lock in $(echo "$funded" | jq -c '.locked_utxos[]'); do
+    lf1 wallet releaseoutput --lock_id="$(echo "$lock" | jq -r .id)" --outpoint="$(echo "$lock" | jq -r .outpoint.txid_str):$(echo "$lock" | jq -r .outpoint.output_index)" >/dev/null 2>&1 || true
+done
 
 record e7-replay result PASS
 echo "E7 PASSED"

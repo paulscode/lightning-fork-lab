@@ -24,7 +24,7 @@ Scenarios, in order:
 | --- | --- |
 | `e3-sync` | A node waits below the activation height, confirms the chain once the node crosses it, and follows v2 blocks over ZMQ and over RPC polling with the node's block ids |
 | `e4b-refuse` | A node pointed at the SHA256d chain refuses to start, in words, and records it in `chain-identity.json`, at the path `--bitcoin.chain-identity-file` names and nowhere else |
-| `e7-replay` | Everything the node signs alone (wallet sends, taproot spends, wallet-funded PSBTs) carries `SIGHASH_UNIFIED` and confirms; a PSBT with a legacy hash type is refused at finalization |
+| `e7-replay` | Everything the node signs alone (wallet sends, taproot spends, wallet-funded and template-funded PSBTs) carries `SIGHASH_UNIFIED` and confirms; a PSBT carrying a signature made without the opt-in is refused at finalization |
 | `e4-isolation` | A strict node drops a stock `lnd` peer at the handshake; a lenient node keeps it but every channel open fails on the chain hash, in both directions; invoices do not cross; no gossip crosses |
 | `channel` | Open, pay both ways (`lnblakert…` invoice and keysend), cooperative close, force close and sweep between two Lightning Fork nodes |
 | `reorg` | A reorg within v2 blocks and one that replaces the activation block itself |
