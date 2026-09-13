@@ -4,6 +4,10 @@
 source "$(dirname "$0")/lib.sh"
 
 step "E4b: start lf-bad against bitcoind-sha"
+# Earlier runs (before the verdict moved to its own volume) may have left a
+# file at the default location; clear it so its absence below means
+# something.
+docker run --rm -v lightning-fork-lab_lf-bad-data:/lnd alpine rm -f /lnd/data/chain/bitcoin/regtest/chain-identity.json
 $COMPOSE --profile refuse up -d lf-bad
 # Make sure the SHA256d chain is past the activation height so the check
 # actually reads a header rather than waiting.
@@ -22,11 +26,16 @@ echo "$logs" | grep -q "not on the Bitcoin BLAKE2b chain" || { echo "$logs" | ta
 echo "$logs" | grep -q "80 bytes" || fail "log does not name the 80-byte header"
 pass "log names the reason: $(echo "$logs" | grep -o 'not on the Bitcoin BLAKE2b chain: [^"]*' | head -1 | cut -c1-120)..."
 
-# The status file is on the volume; read it with a one-off container.
-st=$(docker run --rm -v lightning-fork-lab_lf-bad-data:/lnd:ro alpine cat /lnd/data/chain/bitcoin/regtest/chain-identity.json)
+# lf-bad runs with --bitcoin.chain-identity-file pointing at its own
+# volume, so the verdict must be there and nowhere near the wallet.
+st=$(docker run --rm -v lightning-fork-lab_lf-bad-status:/status:ro alpine cat /status/chain-identity.json)
 [ "$(echo "$st" | jq -r .state)" = refused ] || fail "status file state is $(echo "$st" | jq -r .state)"
 echo "$st" | jq -r .reason | grep -q "SHA256d" || fail "status file reason does not mention SHA256d"
 pass "status file records state=refused with the reason"
+if docker run --rm -v lightning-fork-lab_lf-bad-data:/lnd:ro alpine test -e /lnd/data/chain/bitcoin/regtest/chain-identity.json; then
+    fail "a status file was also written at the default location"
+fi
+pass "no status file at the default location: --bitcoin.chain-identity-file moved it"
 
 $COMPOSE --profile refuse rm -sf lf-bad >/dev/null
 record e4b-refuse result PASS

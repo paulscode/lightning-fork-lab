@@ -153,8 +153,12 @@ services:
       - --listen=0.0.0.0:9735
       - --alias=lf-bad
       - --debuglevel=info
+      # The verdict goes to its own volume, as a wrapper that must not be
+      # handed the wallet directory would have it.
+      - --bitcoin.chain-identity-file=/status/chain-identity.json
     volumes:
       - lf-bad-data:/root/.lnd
+      - lf-bad-status:/status
 
   # Stock lnd on the SHA256d regtest.
   lnd-sha:
@@ -192,4 +196,5 @@ volumes:
   lf1-data:
   lf2-data:
   lf-bad-data:
+  lf-bad-status:
   lnd-sha-data:
