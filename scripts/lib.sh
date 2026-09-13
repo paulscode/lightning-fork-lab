@@ -98,3 +98,19 @@ record() {
     # record NAME KEY VALUE: append a line to results/<name>.log
     echo "$(date -u +%FT%TZ) $2=$3" >> "results/$1.log"
 }
+
+# retry_pay SERVICE ARGS...: a payment attempted in the seconds after a channel
+# becomes active can fail with insufficient_balance or no route while the
+# channel_update exchange completes; try a few times before calling it a
+# failure.
+retry_pay() {
+    local svc=$1; shift
+    local i
+    for i in $(seq 1 10); do
+        if lncli_on "$svc" "$@" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 3
+    done
+    lncli_on "$svc" "$@"
+}

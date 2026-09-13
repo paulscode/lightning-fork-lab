@@ -30,12 +30,12 @@ pass "channel $cp active on both sides"
 step "channel: pay lf1 -> lf2 with a lnblakert invoice"
 inv=$(lf2 addinvoice --amt 50000 --memo "lab" | jq -r .payment_request)
 [[ "$inv" == lnblakert* ]] || fail "invoice prefix wrong: $inv"
-lf1 payinvoice --force "$inv" >/dev/null
+retry_pay lf1 payinvoice --force "$inv" >/dev/null
 wait_for "lf2 settled" 30 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 listinvoices | jq -r '.invoices[-1].state')\" = SETTLED ]"
 pass "lf2 settled a 50000 sat lnblakert invoice"
 
 step "channel: pay lf2 -> lf1 with keysend"
-lf2 sendpayment --keysend --dest="$lf1_pub" --amt 20000 --force >/dev/null
+retry_pay lf2 sendpayment --keysend --dest="$lf1_pub" --amt 20000 --force >/dev/null
 wait_for "lf1 received keysend" 30 sh -c "[ \"\$($COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listinvoices | jq -r '.invoices[-1].state')\" = SETTLED ]"
 pass "lf1 received 20000 sat by keysend"
 
@@ -78,6 +78,18 @@ done
 wait_for "force close resolved on lf2" 240 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.pending_force_closing_channels | length')\" = 0 ]"
 wait_for "force close resolved on lf1" 240 sh -c "[ \"\$($COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.pending_force_closing_channels | length')\" = 0 ]"
 pass "force close from lf2 resolved on both sides after the CSV delay"
+
+step "channel: the sweeps of the force close opted into SIGHASH_UNIFIED"
+for svc in lf1 lf2; do
+    for txid in $(lncli_on "$svc" wallet listsweeps 2>/dev/null | jq -r '.Sweeps.TransactionIds.transaction_ids[]?' ); do
+        sigs=$(b2b getrawtransaction "$txid" true 2>/dev/null | jq -r '.vin[].txinwitness[0]') || continue
+        for sig in $sigs; do
+            last=$(( 16#${sig: -2} ))
+            [ $(( last & 0x20 )) -ne 0 ] || fail "$svc sweep $txid: signature hash type 0x$(printf %02x $last) did not opt in"
+        done
+        pass "$svc sweep $txid opted in on every input"
+    done
+done
 
 step "channel: every confirmed block id still matches the node"
 tip=$(b2b getblockcount)

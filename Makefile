@@ -14,16 +14,19 @@
 SHELL := /bin/bash
 COMPOSE := docker compose
 FORK_DIR := $(abspath ../lightning-fork)
+# The RPC subservers a release build carries; without them lncli has no
+# `wallet` command and the daemon no WalletKit, which the scenarios use.
+LND_TAGS ?= autopilotrpc signrpc walletrpc chainrpc invoicesrpc watchtowerrpc peersrpc routerrpc
 export GOWORK := $(FORK_DIR)/go.work
 export ACTIVATION_HEIGHT ?= 20
 
 .PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios \
-	e3-sync e4-isolation e4b-refuse channel reorg restart
+	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart
 
 build:
 	mkdir -p bin
-	cd $(FORK_DIR) && go build -o $(abspath bin/lnd) ./cmd/lnd
-	cd $(FORK_DIR) && go build -o $(abspath bin/lncli) ./cmd/lncli
+	cd $(FORK_DIR) && go build -tags "$(LND_TAGS)" -o $(abspath bin/lnd) ./cmd/lnd
+	cd $(FORK_DIR) && go build -tags "$(LND_TAGS)" -o $(abspath bin/lncli) ./cmd/lncli
 	$(COMPOSE) build lf1
 
 up:
@@ -57,7 +60,7 @@ lf2:
 lndsha:
 	@$(COMPOSE) exec -T lnd-sha lncli --network=regtest --rpcserver=127.0.0.1:10009 $(CMD)
 
-scenarios: e3-sync e4b-refuse e4-isolation channel reorg restart
+scenarios: e3-sync e4b-refuse e4-isolation e7-replay channel reorg restart
 	@echo "ALL SCENARIOS PASSED"
 
 e3-sync:
@@ -68,6 +71,9 @@ e4-isolation:
 
 e4b-refuse:
 	bash scripts/scenario-e4b-refuse.sh
+
+e7-replay:
+	bash scripts/scenario-e7-replay.sh
 
 channel:
 	bash scripts/scenario-channel.sh
