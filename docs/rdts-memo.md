@@ -1,7 +1,7 @@
 # What the reduced block size does to a Lightning node
 
 The Bitcoin BLAKE2b chain caps blocks at 800 kWU ("reduced data", RDTS)
-until the deployment expires on 2027-08-28. Bitcoin's cap is 4,000 kWU.
+until the deployment expires (2027-09-01 by median time past, per the Knots deployment). Bitcoin's cap is 4,000 kWU.
 This memo puts numbers on what a fifth of the capacity means for the
 transactions a Lightning node must get confirmed on a deadline, and says
 which of LND's defaults that argues for changing. The weights are LND's own
@@ -65,4 +65,4 @@ fee estimation already follows the cap. What is worth doing:
    settings, and measure whether sweeps and justice transactions confirm
    before their deadlines. If they do not, the first knob is
    `contractcourt` budget ratio, the second `sweep.maxfeerate`.
-3. Revisit if mainnet blocks approach the cap before 2027-08-28.
+3. Revisit if mainnet blocks approach the cap before the deployment expires.
