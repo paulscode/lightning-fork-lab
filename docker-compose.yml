@@ -1,0 +1,195 @@
+# Lightning Fork regtest lab.
+#
+# Two chains, deliberately: a Bitcoin Knots BLAKE2b regtest that activates
+# BLAKE2b at a configured height, and a stock SHA256d regtest beside it with a
+# stock lnd, so that isolation between the two Lightning networks can be
+# tested rather than assumed.
+#
+#   knots-b2b (Knots v29.4.1, regtest, blake2b@20)  <-- lf1, lf2 (Lightning Fork)
+#   bitcoind-sha (Bitcoin Core, regtest)            <-- lnd-sha (stock lnd), lf-bad
+#
+# RPC ports are never published to the host. Everything is driven through
+# `docker compose exec` by the scripts in scripts/.
+
+name: lightning-fork-lab
+
+x-lf-common: &lf-common
+  image: lightning-fork:dev
+  build:
+    context: .
+    dockerfile: Dockerfile.lnd-dev
+  restart: "no"
+  environment:
+    LND_ARGS: ""
+  networks: [lab]
+
+services:
+  knots-b2b:
+    image: knots-blake2b:final-zmq
+    restart: unless-stopped
+    environment:
+      CHAIN: regtest
+      RPC_USER: lab
+      RPC_PASSWORD: lab
+      BLAKE2B_HEADLINE: "Lightning Fork lab"
+      BLAKE2B_ACTIVATION_HEIGHT: "${ACTIVATION_HEIGHT:-20}"
+      RPC_ALLOW_IP: 0.0.0.0/0
+    command:
+      - -zmqpubrawblock=tcp://0.0.0.0:28332
+      - -zmqpubrawtx=tcp://0.0.0.0:28333
+      - -txindex=1
+    volumes:
+      - knots-b2b-data:/data
+    networks: [lab]
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -datadir=/data -rpcuser=lab -rpcpassword=lab getblockchaininfo > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  bitcoind-sha:
+    image: lncm/bitcoind:v28.0
+    restart: unless-stopped
+    command:
+      - -regtest=1
+      - -server=1
+      - -txindex=1
+      - -fallbackfee=0.0002
+      - -rpcuser=lab
+      - -rpcpassword=lab
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -rpcport=18443
+      - -zmqpubrawblock=tcp://0.0.0.0:28332
+      - -zmqpubrawtx=tcp://0.0.0.0:28333
+      - -printtoconsole=1
+    volumes:
+      - bitcoind-sha-data:/data/.bitcoin
+    networks: [lab]
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -regtest -rpcuser=lab -rpcpassword=lab -rpcconnect=127.0.0.1 -rpcport=18443 getblockchaininfo > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Lightning Fork, ZMQ mode, strict peer networks (the default).
+  lf1:
+    <<: *lf-common
+    depends_on:
+      knots-b2b:
+        condition: service_healthy
+    command:
+      - --noseedbackup
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoin.blake2b-activation-height=${ACTIVATION_HEIGHT:-20}
+      - --bitcoind.rpchost=knots-b2b:18443
+      - --bitcoind.rpcuser=lab
+      - --bitcoind.rpcpass=lab
+      - --bitcoind.zmqpubrawblock=tcp://knots-b2b:28332
+      - --bitcoind.zmqpubrawtx=tcp://knots-b2b:28333
+      - --rpclisten=0.0.0.0:10009
+      - --restlisten=0.0.0.0:8080
+      - --listen=0.0.0.0:9735
+      - --externalip=lf1:9735
+      - --tlsextradomain=lf1
+      - --alias=lf1
+      - --debuglevel=info,PEER=debug,CRTR=debug,FNDG=debug
+      - --protocol.simple-taproot-chans
+      - --accept-keysend
+    volumes:
+      - lf1-data:/root/.lnd
+
+  # Lightning Fork, RPC polling mode, lenient peer networks (for interop
+  # tests against implementations that do not send the field).
+  lf2:
+    <<: *lf-common
+    depends_on:
+      knots-b2b:
+        condition: service_healthy
+    command:
+      - --noseedbackup
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoin.blake2b-activation-height=${ACTIVATION_HEIGHT:-20}
+      - --bitcoind.rpchost=knots-b2b:18443
+      - --bitcoind.rpcuser=lab
+      - --bitcoind.rpcpass=lab
+      - --bitcoind.rpcpolling
+      - --bitcoind.blockpollinginterval=2s
+      - --bitcoind.txpollinginterval=2s
+      - --allow-peers-without-networks
+      - --rpclisten=0.0.0.0:10009
+      - --restlisten=0.0.0.0:8080
+      - --listen=0.0.0.0:9735
+      - --externalip=lf2:9735
+      - --tlsextradomain=lf2
+      - --alias=lf2
+      - --debuglevel=info,PEER=debug,FNDG=debug
+      - --protocol.simple-taproot-chans
+      - --accept-keysend
+    volumes:
+      - lf2-data:/root/.lnd
+
+  # Lightning Fork pointed at the SHA256d regtest: must refuse to start.
+  lf-bad:
+    <<: *lf-common
+    profiles: [refuse]
+    depends_on:
+      bitcoind-sha:
+        condition: service_healthy
+    command:
+      - --noseedbackup
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoin.blake2b-activation-height=${ACTIVATION_HEIGHT:-20}
+      - --bitcoind.rpchost=bitcoind-sha:18443
+      - --bitcoind.rpcuser=lab
+      - --bitcoind.rpcpass=lab
+      - --bitcoind.zmqpubrawblock=tcp://bitcoind-sha:28332
+      - --bitcoind.zmqpubrawtx=tcp://bitcoind-sha:28333
+      - --rpclisten=0.0.0.0:10009
+      - --listen=0.0.0.0:9735
+      - --alias=lf-bad
+      - --debuglevel=info
+    volumes:
+      - lf-bad-data:/root/.lnd
+
+  # Stock lnd on the SHA256d regtest.
+  lnd-sha:
+    image: lightninglabs/lnd:v0.21.3-beta
+    restart: "no"
+    depends_on:
+      bitcoind-sha:
+        condition: service_healthy
+    command:
+      - --noseedbackup
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoind.rpchost=bitcoind-sha:18443
+      - --bitcoind.rpcuser=lab
+      - --bitcoind.rpcpass=lab
+      - --bitcoind.zmqpubrawblock=tcp://bitcoind-sha:28332
+      - --bitcoind.zmqpubrawtx=tcp://bitcoind-sha:28333
+      - --rpclisten=0.0.0.0:10009
+      - --listen=0.0.0.0:9735
+      - --externalip=lnd-sha:9735
+      - --tlsextradomain=lnd-sha
+      - --alias=lnd-sha
+      - --debuglevel=info,PEER=debug
+    volumes:
+      - lnd-sha-data:/root/.lnd
+    networks: [lab]
+
+networks:
+  lab:
+    driver: bridge
+
+volumes:
+  knots-b2b-data:
+  bitcoind-sha-data:
+  lf1-data:
+  lf2-data:
+  lf-bad-data:
+  lnd-sha-data:

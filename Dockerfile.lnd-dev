@@ -1,0 +1,14 @@
+# Lightning Fork development image: the binaries built from the working tree
+# by `make build`, on a minimal base. The release image is built elsewhere
+# from a pinned commit; this one exists so a change in the working tree can be
+# exercised in the lab within a minute.
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates bash curl jq \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY bin/lnd bin/lncli /usr/local/bin/
+
+EXPOSE 9735 10009 8080
+ENTRYPOINT ["/usr/local/bin/lnd"]

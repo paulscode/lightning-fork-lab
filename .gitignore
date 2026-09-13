@@ -1,0 +1,7 @@
+bin/
+results/*.log
+build-logs/
+fixtures/*.jsonl
+fixtures/*.blk
+fixtures/*.bz2
+fixtures/*.err
