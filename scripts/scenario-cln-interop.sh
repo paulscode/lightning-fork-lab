@@ -20,7 +20,7 @@ wait_cln_synced() { wait_for "cln at the tip" 90 cln_synced; }
 cln_pay() {
 	local i out
 	for i in $(seq 1 8); do
-		if out=$(cln pay "$1" 2>&1) && [ "$(echo "$out" | jq -r .status 2>/dev/null)" = complete ]; then
+		if out=$(cln pay "$1" 2>&1 | grep -v '^#') && [ "$(echo "$out" | jq -r .status 2>/dev/null)" = complete ]; then
 			echo "$out"; return 0
 		fi
 		sleep 5
@@ -148,7 +148,9 @@ coop=""; forced=""
 for cp in $(lf1 listchannels | jq -r "[.channels[] | select(.remote_pubkey == \"$cln_pub\")] | .[].channel_point"); do
 	if [ -z "$coop" ]; then
 		cid=$(cln listpeerchannels | jq -r ".channels[] | select(.funding_txid == \"${cp%%:*}\") | .short_channel_id // .channel_id")
-		res=$(cln close "$cid" 30)
+		# lightning-cli prints notifications as "# ..." lines before the
+		# result; only the JSON is the answer.
+		res=$(cln close "$cid" 30 | grep -v '^#')
 		[ "$(echo "$res" | jq -r .type)" = mutual ] || fail "cln close was not mutual: $res"
 		coop=$cp
 	else
