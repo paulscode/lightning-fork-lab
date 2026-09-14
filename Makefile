@@ -92,8 +92,8 @@ bolt12:
 # Core Lightning with the BLAKE2b chain identity: the privkeyio port plus the
 # patch series in the fork repository, built from source (minutes).
 cln:
-	mkdir -p build/cln-patches
-	cp $(FORK_DIR)/references/cln-fork/chain-identity/*.patch build/cln-patches/
+	rm -rf build/cln-patches && mkdir -p build/cln-patches
+	cp $(FORK_DIR)/contrib/cln-chain-identity/*.patch build/cln-patches/
 	id=$$(docker create knots-blake2b:final-zmq) && docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli && docker rm $$id >/dev/null
 	$(COMPOSE) --profile cln build cln
 	$(COMPOSE) --profile cln up -d cln

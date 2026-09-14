@@ -1,10 +1,11 @@
 # Core Lightning on the Bitcoin BLAKE2b chain: the privkeyio port (header
 # parsing) plus the chain-identity patch series kept in the fork repository
-# (references/cln-fork/chain-identity), built from source. The patches are
+# (contrib/cln-chain-identity), built from source. The patches are
 # copied into build/cln-patches by `make cln`.
 FROM ubuntu:24.04 AS builder
 ARG CLN_REPO=https://github.com/privkeyio/lightning
-ARG CLN_REF=v26.06.7-blake2b.3
+# v26.06.7-blake2b.3, pinned by commit rather than by tag.
+ARG CLN_REF=c6d386ffac2b8465d918be24a8aa9a626e051a41
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         autoconf automake build-essential git libtool libsqlite3-dev \
@@ -12,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gettext protobuf-compiler jq pkg-config libpq-dev ca-certificates lowdown \
     && rm -rf /var/lib/apt/lists/* \
     && pip3 install --break-system-packages uv
-RUN git clone --depth 1 -b "$CLN_REF" "$CLN_REPO" /src
+RUN git clone "$CLN_REPO" /src && git -C /src checkout -q "$CLN_REF"
 WORKDIR /src
 COPY build/cln-patches/ /patches/
 RUN git config user.email lab@example.invalid && git config user.name lab \
@@ -31,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # image is not something BuildKit resolves).
 COPY build/bitcoin-cli /usr/local/bin/bitcoin-cli
 COPY --from=builder /out/usr/local/ /usr/local/
-RUN lightningd --version
+RUN lightningd --version && bitcoin-cli --version | head -1
 VOLUME /data
 EXPOSE 9735
 ENTRYPOINT ["lightningd"]

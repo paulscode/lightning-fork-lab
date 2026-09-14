@@ -7,8 +7,8 @@
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
-CLN_CONTAINER=${CLN_CONTAINER:-lab-cln2}
-CLN_HOST=${CLN_HOST:-$CLN_CONTAINER}
+CLN_CONTAINER=${CLN_CONTAINER:-lightning-fork-lab-cln-1}
+CLN_HOST=${CLN_HOST:-cln}
 cln() { docker exec "$CLN_CONTAINER" lightning-cli --network=regtest --lightning-dir=/data "$@"; }
 # Core Lightning polls bitcoind rather than listening to ZMQ, so after mining
 # it lags the tip for up to its poll interval; a payment sent meanwhile is
@@ -37,16 +37,34 @@ wait_cln_synced
 lf1_pub=$(pubkey_of lf1)
 lf2_pub=$(pubkey_of lf2)
 cln_pub=$(cln getinfo | jq -r .id)
-pass "lf1 $lf1_pub, cln $cln_pub ($(cln getinfo | jq -r .version))"
+# The chain-identity series adds this option; an unpatched node lacks it.
+cln listconfigs | jq -e '.configs["allow-peers-without-networks"]' >/dev/null || fail "cln is not the patched build"
+pass "lf1 $lf1_pub, cln $cln_pub ($(cln getinfo | jq -r .version), chain identity applied)"
 
 step "cln-interop: peering both ways"
-lf1 connect "$cln_pub@$CLN_HOST:9735" >/dev/null 2>&1 || true
-wait_for "lf1 sees cln" 30 sh -c "$COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listpeers | jq -e '.peers[] | select(.pub_key == \"$cln_pub\")' >/dev/null"
+# Core Lightning reports a peer connected only once init is exchanged, so
+# its view is checked for both directions.
+cln_sees_lf1() { cln listpeers | jq -e ".peers[] | select(.id == \"$lf1_pub\" and .connected)" >/dev/null; }
+cln disconnect "$lf1_pub" true >/dev/null 2>&1 || true
 lf1 disconnect "$cln_pub" >/dev/null 2>&1 || true
 sleep 2
+lf1 connect "$cln_pub@$CLN_HOST:9735" >/dev/null
+wait_for "cln sees lf1 (lf1 dialled)" 30 cln_sees_lf1
+lf1 disconnect "$cln_pub" >/dev/null 2>&1 || true
+wait_for "cln sees lf1 gone" 30 sh -c "! docker exec $CLN_CONTAINER lightning-cli --network=regtest --lightning-dir=/data listpeers | jq -e '.peers[] | select(.id == \"$lf1_pub\" and .connected)' >/dev/null"
 cln connect "$lf1_pub@lf1:9735" >/dev/null
-wait_for "cln sees lf1" 30 sh -c "docker exec $CLN_CONTAINER lightning-cli --network=regtest --lightning-dir=/data listpeers | jq -e '.peers[] | select(.id == \"$lf1_pub\" and .connected)' >/dev/null"
+wait_for "cln sees lf1 (cln dialled)" 30 cln_sees_lf1
 pass "connected from each side"
+
+step "cln-interop: a stock lnd, which names no networks, is dropped"
+sha_pub=$(pubkey_of lnd-sha)
+lndsha connect "$cln_pub@$CLN_HOST:9735" >/dev/null 2>&1 || true
+sleep 3
+if lndsha listpeers | jq -e ".peers[] | select(.pub_key == \"$cln_pub\")" >/dev/null; then
+	fail "cln kept a peer that names no networks"
+fi
+docker logs --since 30s "$CLN_CONTAINER" 2>&1 | grep -q "Peer names no networks" || fail "cln did not say why it dropped lnd-sha"
+pass "lnd-sha dropped at init"
 
 step "cln-interop: funding the Core Lightning wallet"
 if [ "$(cln listfunds | jq '[.outputs[] | select(.status == "confirmed")] | length')" = 0 ]; then
@@ -67,7 +85,7 @@ if ! lf1 listchannels | jq -e "[.channels[] | select(.remote_pubkey == \"$cln_pu
 	cln fundchannel "$lf1_pub" 1000000 normal true >/dev/null
 	mine_b2b 6
 fi
-wait_for "lf1 sees the channel from cln active" 120 sh -c "$COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -e '[.channels[] | select(.remote_pubkey == \"$cln_pub\" and .active)] | length >= 1' >/dev/null"
+wait_for "lf1 sees the channel from cln active" 120 sh -c "$COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -e '[.channels[] | select(.remote_pubkey == \"$cln_pub\" and .active and .initiator == false)] | length >= 1' >/dev/null"
 pass "channel from cln active"
 
 step "cln-interop: channel opened by lf1 toward Core Lightning"
@@ -75,7 +93,7 @@ if ! lf1 listchannels | jq -e "[.channels[] | select(.remote_pubkey == \"$cln_pu
 	lf1 openchannel --node_key="$cln_pub" --local_amt=1000000 --push_amt=300000 >/dev/null
 	mine_b2b 6
 fi
-wait_for "two active channels with cln on lf1" 120 sh -c "$COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -e '[.channels[] | select(.remote_pubkey == \"$cln_pub\" and .active)] | length >= 2' >/dev/null"
+wait_for "lf1's channel to cln active" 120 sh -c "$COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -e '[.channels[] | select(.remote_pubkey == \"$cln_pub\" and .active and .initiator == true)] | length >= 1' >/dev/null"
 wait_for "two channels normal on cln" 120 sh -c "[ \"\$(docker exec $CLN_CONTAINER lightning-cli --network=regtest --lightning-dir=/data listpeerchannels | jq '[.channels[] | select(.state == \"CHANNELD_NORMAL\")] | length')\" -ge 2 ]"
 pass "channel from lf1 active"
 
@@ -126,22 +144,30 @@ pass "cln paid lf1's offer"
 
 step "cln-interop: cooperative close from Core Lightning, force close from lf1"
 # The first channel closes cooperatively from Core Lightning's side, every
-# other one is force closed from lf1's.
-first=1
+# other one is force closed from lf1's; each side has to record the kind.
+coop=""; forced=""
 for cp in $(lf1 listchannels | jq -r "[.channels[] | select(.remote_pubkey == \"$cln_pub\")] | .[].channel_point"); do
-	if [ "$first" = 1 ]; then
+	if [ -z "$coop" ]; then
 		cid=$(cln listpeerchannels | jq -r ".channels[] | select(.funding_txid == \"${cp%%:*}\") | .short_channel_id // .channel_id")
-		cln close "$cid" 30 >/dev/null
-		first=0
+		res=$(cln close "$cid" 30)
+		[ "$(echo "$res" | jq -r .type)" = mutual ] || fail "cln close was not mutual: $res"
+		coop=$cp
 	else
-		lf1 closechannel --force --funding_txid="${cp%%:*}" --output_index="${cp##*:}" >/dev/null 2>&1 || true
+		lf1 closechannel --force --funding_txid="${cp%%:*}" --output_index="${cp##*:}" >/dev/null || fail "lf1 could not force close $cp"
+		forced="$forced $cp"
 	fi
 done
+[ -n "$coop" ] && [ -n "$forced" ] || fail "expected one channel of each kind, got coop='$coop' forced='$forced'"
 mine_b2b 6
 mine_b2b 160
 wait_for "no channels left with cln on lf1" 180 sh -c "$COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -e '[.channels[] | select(.remote_pubkey == \"$cln_pub\")] | length == 0' >/dev/null"
 wait_for "no pending channels on lf1" 240 sh -c "$COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq -e '[.pending_open_channels[], .pending_force_closing_channels[], .waiting_close_channels[]] | length == 0' >/dev/null"
 wait_for "cln channels settled on chain" 240 sh -c "[ \"\$(docker exec $CLN_CONTAINER lightning-cli --network=regtest --lightning-dir=/data listpeerchannels | jq '[.channels[] | select(.state != \"ONCHAIN\" and .state != \"CLOSED\")] | length')\" = 0 ]"
-pass "both channels closed: cln states $(cln listpeerchannels | jq -c '[.channels[].state]'), cln funds $(cln listfunds | jq '[.outputs[] | select(.status == "confirmed") | .amount_msat] | add') msat"
+closed=$(lf1 closedchannels)
+[ "$(echo "$closed" | jq -r ".channels[] | select(.channel_point == \"$coop\") | .close_type")" = COOPERATIVE_CLOSE ] || fail "lf1 did not record the cooperative close"
+for cp in $forced; do
+	[ "$(echo "$closed" | jq -r ".channels[] | select(.channel_point == \"$cp\") | .close_type")" = LOCAL_FORCE_CLOSE ] || fail "lf1 did not record the force close of $cp"
+done
+pass "both channels closed: cln states $(cln listpeerchannels | jq -c '[.channels[].state]'), lf1 close types $(echo "$closed" | jq -c '[.channels[] | select(.remote_pubkey == "'"$cln_pub"'") | .close_type]'), cln funds $(cln listfunds | jq '[.outputs[] | select(.status == "confirmed") | .amount_msat] | add') msat"
 
 echo; echo "CLN INTEROP PASSED"
