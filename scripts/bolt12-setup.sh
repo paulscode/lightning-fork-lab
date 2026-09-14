@@ -9,7 +9,7 @@ wait_for "lf2 synced" 180 lnd_synced lf2
 lf1_pub=$(pubkey_of lf1)
 lf2_pub=$(pubkey_of lf2)
 
-if [ "$(lf1 listchannels | jq '[.channels[] | select(.active)] | length')" = 1 ]; then
+if [ "$(lf1 listchannels | jq '[.channels[] | select(.active)] | length')" -ge 1 ]; then
 	pass "lf1 already has an active channel"
 	exit 0
 fi

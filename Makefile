@@ -21,7 +21,7 @@ export GOWORK := $(FORK_DIR)/go.work
 export ACTIVATION_HEIGHT ?= 20
 
 .PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios \
-	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart
+	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart bolt12
 
 build:
 	mkdir -p bin
@@ -60,7 +60,7 @@ lf2:
 lndsha:
 	@$(COMPOSE) exec -T lnd-sha lncli --network=regtest --rpcserver=127.0.0.1:10009 $(CMD)
 
-scenarios: e3-sync e4b-refuse e4-isolation e7-replay channel reorg restart
+scenarios: e3-sync e4b-refuse e4-isolation e7-replay channel reorg restart bolt12
 	@echo "ALL SCENARIOS PASSED"
 
 e3-sync:
@@ -83,3 +83,6 @@ reorg:
 
 restart:
 	bash scripts/scenario-restart.sh
+
+bolt12:
+	bash scripts/scenario-bolt12.sh
