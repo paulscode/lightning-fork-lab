@@ -73,10 +73,16 @@ if [ "$(cln listfunds | jq '[.outputs[] | select(.status == "confirmed")] | leng
 	mine_b2b 6
 	wait_for "cln sees funds" 60 sh -c "[ \"\$(docker exec $CLN_CONTAINER lightning-cli --network=regtest --lightning-dir=/data listfunds | jq '[.outputs[] | select(.status == \"confirmed\")] | length')\" != 0 ]"
 fi
-if [ "$(lf1 walletbalance | jq -r .confirmed_balance)" -lt 3000000 ]; then
-	fund_lf lf1 1
-fi
-pass "both wallets funded"
+# lf1 always gets a fresh coin and opens its channel from it: a wallet that
+# has been through the reorg scenario still lists outputs of the old chain
+# as confirmed, and a funding transaction built from one is refused.
+ensure_b2b_funds 2
+lf1_addr=$(lf1 newaddress p2tr | jq -r .address)
+lf1_fund_tx=$(b2b -rpcwallet=lab sendtoaddress "$lf1_addr" 1)
+mine_b2b 6
+lf1_utxo="$lf1_fund_tx:$(b2b getrawtransaction "$lf1_fund_tx" 1 | jq -r ".vout[] | select(.scriptPubKey.address == \"$lf1_addr\") | .n")"
+wait_for "lf1 sees its coin" 60 sh -c "$COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listunspent | jq -e '.utxos[] | select(.outpoint == \"$lf1_utxo\")' >/dev/null"
+pass "both wallets funded (lf1 from $lf1_utxo)"
 
 step "cln-interop: channel opened by Core Lightning toward lf1"
 if ! lf1 listchannels | jq -e "[.channels[] | select(.remote_pubkey == \"$cln_pub\" and .initiator == false)] | length >= 1" >/dev/null; then
@@ -89,7 +95,7 @@ pass "channel from cln active"
 
 step "cln-interop: channel opened by lf1 toward Core Lightning"
 if ! lf1 listchannels | jq -e "[.channels[] | select(.remote_pubkey == \"$cln_pub\" and .initiator == true)] | length >= 1" >/dev/null; then
-	lf1 openchannel --node_key="$cln_pub" --local_amt=1000000 --push_amt=300000 >/dev/null
+	lf1 openchannel --node_key="$cln_pub" --local_amt=1000000 --push_amt=300000 --utxo="$lf1_utxo" >/dev/null
 	mine_b2b 6
 fi
 wait_for "lf1's channel to cln active" 120 sh -c "$COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -e '[.channels[] | select(.remote_pubkey == \"$cln_pub\" and .active and .initiator == true)] | length >= 1' >/dev/null"

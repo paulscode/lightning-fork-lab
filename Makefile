@@ -11,6 +11,7 @@
 #   make sha CMD="getblockcount"      bitcoin-cli on the SHA256d node
 #   make lf1 CMD="getinfo"            lncli on lf1 (also lf2, lndsha)
 #   make cln / make cln-interop       Core Lightning (BLAKE2b identity) and the interop scenario
+#   make all-scenarios                every scenario including cln-interop (after make cln)
 #   make cln-cli CMD="getinfo"        lightning-cli on it
 
 SHELL := /bin/bash
@@ -62,8 +63,15 @@ lf2:
 lndsha:
 	@$(COMPOSE) exec -T lnd-sha lncli --network=regtest --rpcserver=127.0.0.1:10009 $(CMD)
 
-scenarios: e3-sync e4b-refuse e4-isolation e7-replay channel reorg restart bolt12
+# reorg goes last: it replaces the chain from below the activation height,
+# which voids every coin and channel funded before it (lnd keeps the
+# channels open and the wallet keeps the coins; see the plan's note).
+scenarios: e3-sync e4b-refuse e4-isolation e7-replay channel restart bolt12 reorg
 	@echo "ALL SCENARIOS PASSED"
+
+# Everything, including the Core Lightning interop scenario (needs `make cln`).
+all-scenarios: e3-sync e4b-refuse e4-isolation e7-replay channel restart bolt12 cln-interop reorg
+	@echo "ALL SCENARIOS PASSED, WITH CORE LIGHTNING"
 
 e3-sync:
 	bash scripts/scenario-e3-sync.sh
