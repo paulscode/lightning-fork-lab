@@ -5,3 +5,4 @@ fixtures/*.jsonl
 fixtures/*.blk
 fixtures/*.bz2
 fixtures/*.err
+build/

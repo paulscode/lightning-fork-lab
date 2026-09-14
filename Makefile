@@ -10,6 +10,8 @@
 #   make b2b CMD="getblockcount"      bitcoin-cli on the BLAKE2b node
 #   make sha CMD="getblockcount"      bitcoin-cli on the SHA256d node
 #   make lf1 CMD="getinfo"            lncli on lf1 (also lf2, lndsha)
+#   make cln / make cln-interop       Core Lightning (BLAKE2b identity) and the interop scenario
+#   make cln-cli CMD="getinfo"        lightning-cli on it
 
 SHELL := /bin/bash
 COMPOSE := docker compose
@@ -86,3 +88,18 @@ restart:
 
 bolt12:
 	bash scripts/scenario-bolt12.sh
+
+# Core Lightning with the BLAKE2b chain identity: the privkeyio port plus the
+# patch series in the fork repository, built from source (minutes).
+cln:
+	mkdir -p build/cln-patches
+	cp $(FORK_DIR)/references/cln-fork/chain-identity/*.patch build/cln-patches/
+	id=$$(docker create knots-blake2b:final-zmq) && docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli && docker rm $$id >/dev/null
+	$(COMPOSE) --profile cln build cln
+	$(COMPOSE) --profile cln up -d cln
+
+cln-interop:
+	CLN_CONTAINER=lightning-fork-lab-cln-1 CLN_HOST=cln bash scripts/scenario-cln-interop.sh
+
+cln-cli:
+	docker exec lightning-fork-lab-cln-1 lightning-cli --network=regtest --lightning-dir=/data $(CMD)

@@ -186,6 +186,33 @@ services:
       - lnd-sha-data:/root/.lnd
     networks: [lab]
 
+  # Core Lightning with the BLAKE2b chain identity (see Dockerfile.cln-blake2b),
+  # for the interop scenario. Started with `make cln`.
+  cln:
+    image: cln-blake2b:lab
+    build:
+      context: .
+      dockerfile: Dockerfile.cln-blake2b
+    restart: "no"
+    profiles: [cln]
+    depends_on:
+      knots-b2b:
+        condition: service_healthy
+    command:
+      - --network=regtest
+      - --lightning-dir=/data
+      - --bitcoin-rpcconnect=knots-b2b
+      - --bitcoin-rpcport=18443
+      - --bitcoin-rpcuser=lab
+      - --bitcoin-rpcpassword=lab
+      - --bind-addr=0.0.0.0:9735
+      - --announce-addr=cln:9735
+      - --alias=cln
+      - --log-level=debug
+    volumes:
+      - cln-data:/data
+    networks: [lab]
+
 networks:
   lab:
     driver: bridge
@@ -198,3 +225,4 @@ volumes:
   lf-bad-data:
   lf-bad-status:
   lnd-sha-data:
+  cln-data:
