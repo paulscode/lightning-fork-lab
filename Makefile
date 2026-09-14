@@ -16,7 +16,7 @@ COMPOSE := docker compose
 FORK_DIR := $(abspath ../lightning-fork)
 # The RPC subservers a release build carries; without them lncli has no
 # `wallet` command and the daemon no WalletKit, which the scenarios use.
-LND_TAGS ?= autopilotrpc signrpc walletrpc chainrpc invoicesrpc watchtowerrpc peersrpc routerrpc
+LND_TAGS ?= autopilotrpc signrpc walletrpc chainrpc invoicesrpc watchtowerrpc peersrpc routerrpc offersrpc
 export GOWORK := $(FORK_DIR)/go.work
 export ACTIVATION_HEIGHT ?= 20
 
