@@ -48,8 +48,8 @@ step "bolt12: lf1 sees both invoices settled"
 inv_list=$(lf1 offer invoices)
 settled=$(echo "$inv_list" | grep -c '"state": *"SETTLED"' || true)
 [ "$settled" -ge 2 ] || fail "expected at least two settled invoices, got $settled"
-issued=$(lf1 offer list | grep -m1 invoices_issued | sed 's/[^0-9]//g')
-[ "$issued" -ge 2 ] || fail "invoices_issued is $issued"
+issued=$(lf1 offer list | jq -r --arg id "$(echo "$offer_json" | json_field offer_id)" '.offers[] | select(.offer_id == $id) | .invoices_issued')
+[ "${issued:-0}" -ge 2 ] || fail "invoices_issued is $issued"
 pass "$settled settled invoices on lf1"
 
 step "bolt12: the other way, lf2 mints a priced offer and lf1 pays it"

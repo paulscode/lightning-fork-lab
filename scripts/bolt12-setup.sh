@@ -10,7 +10,10 @@ lf1_pub=$(pubkey_of lf1)
 lf2_pub=$(pubkey_of lf2)
 
 if [ "$(lf1 listchannels | jq '[.channels[] | select(.active)] | length')" -ge 1 ]; then
-	pass "lf1 already has an active channel"
+	# After a restart lf2's side of the channel can lag behind lf1's, and
+	# a payment from lf2 before its link is up fails for lack of balance.
+	wait_for "channel active on lf2" 90 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" -ge 1 ]"
+	pass "lf1 and lf2 already share an active channel"
 	exit 0
 fi
 
