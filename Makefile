@@ -37,10 +37,10 @@ up:
 	$(COMPOSE) up -d lf1 lf2 lnd-sha
 
 down:
-	$(COMPOSE) --profile refuse down
+	$(COMPOSE) --profile refuse --profile cln down
 
 nuke:
-	$(COMPOSE) --profile refuse down -v
+	$(COMPOSE) --profile refuse --profile cln down -v
 	rm -rf results/*.log
 	@echo "All lab state wiped."
 

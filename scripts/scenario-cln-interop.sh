@@ -44,17 +44,16 @@ pass "lf1 $lf1_pub, cln $cln_pub ($(cln getinfo | jq -r .version), chain identit
 step "cln-interop: peering both ways"
 # Core Lightning reports a peer connected only once init is exchanged, so
 # its view is checked for both directions.
+# On a rerun the two already share a channel and Core Lightning reconnects
+# on its own, so an existing connection counts; each side's own dial has to
+# be accepted or answered "already connected", never refused.
 cln_sees_lf1() { cln listpeers | jq -e ".peers[] | select(.id == \"$lf1_pub\" and .connected)" >/dev/null; }
-cln disconnect "$lf1_pub" true >/dev/null 2>&1 || true
-lf1 disconnect "$cln_pub" >/dev/null 2>&1 || true
-sleep 2
-lf1 connect "$cln_pub@$CLN_HOST:9735" >/dev/null
-wait_for "cln sees lf1 (lf1 dialled)" 30 cln_sees_lf1
-lf1 disconnect "$cln_pub" >/dev/null 2>&1 || true
-wait_for "cln sees lf1 gone" 30 sh -c "! docker exec $CLN_CONTAINER lightning-cli --network=regtest --lightning-dir=/data listpeers | jq -e '.peers[] | select(.id == \"$lf1_pub\" and .connected)' >/dev/null"
-cln connect "$lf1_pub@lf1:9735" >/dev/null
-wait_for "cln sees lf1 (cln dialled)" 30 cln_sees_lf1
-pass "connected from each side"
+out=$(lf1 connect "$cln_pub@$CLN_HOST:9735" 2>&1 || true)
+echo "$out" | grep -qE 'initiated|already connected' || fail "lf1 connect: $out"
+wait_for "cln sees lf1" 30 cln_sees_lf1
+res=$(cln connect "$lf1_pub@lf1:9735")
+[ "$(echo "$res" | jq -r .id)" = "$lf1_pub" ] || fail "cln connect: $res"
+pass "connected from each side (cln's connection is $(echo "$res" | jq -r .direction)bound)"
 
 step "cln-interop: a stock lnd, which names no networks, is dropped"
 sha_pub=$(pubkey_of lnd-sha)
