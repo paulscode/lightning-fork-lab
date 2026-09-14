@@ -33,7 +33,7 @@ build:
 	$(COMPOSE) build lf1
 
 up:
-	$(COMPOSE) up -d knots-b2b bitcoind-sha
+	$(COMPOSE) up -d fees knots-b2b bitcoind-sha
 	bash scripts/wait-chains.sh
 	$(COMPOSE) up -d lf1 lf2 lnd-sha
 

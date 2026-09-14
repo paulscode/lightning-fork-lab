@@ -24,6 +24,16 @@ x-lf-common: &lf-common
   networks: [lab]
 
 services:
+  # A fee estimate for lnd: on regtest bitcoind's estimatesmartfee has nothing
+  # to say and lnd falls back to 25 sat/vB, which no other node's estimate
+  # (1 sat/vB) accepts in a cooperative close. fees/fees.json says 1 sat/vB.
+  fees:
+    image: python:3-alpine
+    command: ["python", "-m", "http.server", "8080", "--directory", "/srv"]
+    volumes:
+      - ./fees:/srv:ro
+    networks: [lab]
+
   knots-b2b:
     image: knots-blake2b:final-zmq
     restart: unless-stopped
@@ -84,6 +94,7 @@ services:
       - --bitcoin.regtest
       - --bitcoin.node=bitcoind
       - --bitcoin.blake2b-activation-height=${ACTIVATION_HEIGHT:-20}
+      - --fee.url=http://fees:8080/fees.json
       - --bitcoind.rpchost=knots-b2b:18443
       - --bitcoind.rpcuser=lab
       - --bitcoind.rpcpass=lab
@@ -113,6 +124,7 @@ services:
       - --bitcoin.regtest
       - --bitcoin.node=bitcoind
       - --bitcoin.blake2b-activation-height=${ACTIVATION_HEIGHT:-20}
+      - --fee.url=http://fees:8080/fees.json
       - --bitcoind.rpchost=knots-b2b:18443
       - --bitcoind.rpcuser=lab
       - --bitcoind.rpcpass=lab
@@ -144,6 +156,7 @@ services:
       - --bitcoin.regtest
       - --bitcoin.node=bitcoind
       - --bitcoin.blake2b-activation-height=${ACTIVATION_HEIGHT:-20}
+      - --fee.url=http://fees:8080/fees.json
       - --bitcoind.rpchost=bitcoind-sha:18443
       - --bitcoind.rpcuser=lab
       - --bitcoind.rpcpass=lab
