@@ -1,0 +1,17 @@
+# Core Lightning as privkeyio released it (v26.06.7-blake2b.3, header parsing
+# only, Bitcoin's chain identity), for the upgrade-path scenario. The binaries
+# come from the GitHub release; bitcoin-cli from the lab's Knots image, put in
+# build/ by make cln-release.
+FROM ubuntu:24.04
+ARG CLN_RELEASE=v26.06.7-blake2b.3
+ARG CLN_TARBALL=clightning-v26.06.7-blake2b.3-Ubuntu-24.04-amd64.tar.xz
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsodium23 libsqlite3-0 libpq5 zlib1g ca-certificates jq curl python3 xz-utils \
+        libevent-2.1-7 libevent-pthreads-2.1-7 libevent-extra-2.1-7 \
+    && rm -rf /var/lib/apt/lists/*
+COPY build/bitcoin-cli /usr/local/bin/bitcoin-cli
+COPY build/${CLN_TARBALL} /tmp/cln.tar.xz
+RUN tar -xJf /tmp/cln.tar.xz -C / && rm /tmp/cln.tar.xz && lightningd --version && bitcoin-cli --version | head -1
+VOLUME /data
+EXPOSE 9735
+ENTRYPOINT ["lightningd"]

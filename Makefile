@@ -12,6 +12,7 @@
 #   make lf1 CMD="getinfo"            lncli on lf1 (also lf2, lndsha)
 #   make cln / make cln-interop       Core Lightning (BLAKE2b identity) and the interop scenario
 #   make all-scenarios                every scenario including cln-interop (after make cln)
+#   make cln-release / cln-migration  the released privkeyio binaries, and the upgrade-path scenario
 #   make cln-cli CMD="getinfo"        lightning-cli on it
 
 SHELL := /bin/bash
@@ -108,6 +109,20 @@ cln:
 
 cln-interop:
 	CLN_CONTAINER=lightning-fork-lab-cln-1 CLN_HOST=cln bash scripts/scenario-cln-interop.sh
+
+# The released privkeyio binaries (Bitcoin's identity), for the upgrade-path
+# scenario: downloaded from the GitHub release and checked against its sums.
+CLN_RELEASE ?= v26.06.7-blake2b.3
+CLN_TARBALL ?= clightning-$(CLN_RELEASE)-Ubuntu-24.04-amd64.tar.xz
+cln-release:
+	mkdir -p build
+	id=$$(docker create knots-blake2b:final-zmq) && docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli && docker rm $$id >/dev/null
+	[ -f build/$(CLN_TARBALL) ] || gh release download $(CLN_RELEASE) --repo privkeyio/lightning -p '$(CLN_TARBALL)' -p 'SHA256SUMS-$(CLN_RELEASE)' -D build
+	cd build && grep '$(CLN_TARBALL)' SHA256SUMS-$(CLN_RELEASE) | sha256sum -c
+	docker build -f Dockerfile.cln-release --build-arg CLN_TARBALL=$(CLN_TARBALL) -t cln-blake2b-release:lab .
+
+cln-migration:
+	bash scripts/scenario-cln-migration.sh
 
 cln-cli:
 	docker exec lightning-fork-lab-cln-1 lightning-cli --network=regtest --lightning-dir=/data $(CMD)
