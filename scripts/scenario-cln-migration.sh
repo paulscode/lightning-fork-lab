@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Upgrade path of the chain-identity series. Two Core Lightning nodes on the released build open an announced channel
 # with Bitcoin's identity, then both move to the patched build on the same
-# data: the restamp must be refused without --database-upgrade=true, happen
+# data: the restamp must be refused without --restamp-wallet-for-this-chain, happen
 # with it, and the channel must reestablish and be announced again under
 # the new identity, so that Lightning Fork (lf1) learns it.
 set -euo pipefail
@@ -38,18 +38,27 @@ wait_for "channel announced on mig2's graph" 120 sh -c "[ \"\$(docker exec mig2 
 scid=$(c mig1 listpeerchannels | jq -r '.channels[0].short_channel_id')
 pass "channel $scid announced under the old identity"
 
-step "migration: the patched build refuses to restamp without --database-upgrade=true"
+step "migration: the patched build refuses to restamp without --restamp-wallet-for-this-chain"
 docker rm -f mig1 mig2 >/dev/null
 start mig1 $PATCHED
 sleep 15
-docker logs mig1 2>&1 | grep -q "Start once with --database-upgrade=true" || fail "no refusal message"
+docker logs mig1 2>&1 | grep -q "Start once with --restamp-wallet-for-this-chain" || fail "no refusal message"
 [ "$(docker inspect -f '{{.State.Running}}' mig1)" = false ] || fail "mig1 kept running"
 pass "refused with the message, and stopped"
 
 step "migration: with the flag, both restamp, reestablish and announce again"
 docker rm -f mig1 >/dev/null
+# --database-upgrade=true alone must not restamp: that is the flag
+# cln-startos passes unconditionally, and the whole point of the dedicated
+# one is that a distribution cannot set it by accident.
 start mig1 $PATCHED --database-upgrade=true
-start mig2 $PATCHED --database-upgrade=true
+wait_for "mig1 stops again" 60 sh -c '! docker ps --format "{{.Names}}" | grep -qx mig1'
+docker logs mig1 2>&1 | grep -q "Start once with --restamp-wallet-for-this-chain" \
+	|| fail "--database-upgrade=true was enough on its own, which is the hole"
+pass "--database-upgrade=true alone is not enough"
+docker rm -f mig1 >/dev/null 2>&1 || true
+start mig1 $PATCHED --restamp-wallet-for-this-chain
+start mig2 $PATCHED --restamp-wallet-for-this-chain
 for n in mig1 mig2; do
 	wait_for "$n restamps" 90 sh -c "docker logs $n 2>&1 | grep -q \"adopting this chain's chain_hash\""
 	wait_for "$n removes its gossip store" 30 sh -c "docker logs $n 2>&1 | grep -q 'Removed .*gossip_store'"

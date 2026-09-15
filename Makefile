@@ -24,7 +24,7 @@ LND_TAGS ?= autopilotrpc signrpc walletrpc chainrpc invoicesrpc watchtowerrpc pe
 export GOWORK := $(FORK_DIR)/go.work
 export ACTIVATION_HEIGHT ?= 20
 
-.PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup offer-latency \
+.PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup offer-latency cln4-split \
 	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart bolt12
 
 build:
@@ -73,6 +73,13 @@ lndsha:
 # BOLT 12 invoice fetch takes, and the smallest payer timeout it fits inside.
 offer-latency:
 	@scripts/scenario-offer-latency.sh
+
+# cln4-split asks whether Lightning Fork and privkeyio v26.06.7-blake2b.4 can
+# reach each other. Same chain, and currently not the same Lightning network.
+# Needs the .4 image: make cln-release CLN_RELEASE=v26.06.7-blake2b.4 with the
+# tag overridden, see the script header.
+cln4-split:
+	@scripts/scenario-cln4-split.sh
 
 bridge-setup:
 	@scripts/bridge-setup.sh
