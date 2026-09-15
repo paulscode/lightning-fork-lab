@@ -18,10 +18,10 @@
 #   COST    how long our fetch from the miner's offer takes
 #
 # It does, comfortably. The cost is milliseconds. What this measures instead is
-# the thing that turned out to matter: fetches do not always succeed, and
-# whether they do depends on the topology and on whether the offer carries a
-# blinded path. Run the matrix rather than a single case, because a single case
-# reports whichever answer you happened to pick.
+# the thing that turned out to matter: about 15% of fetches do not complete at
+# all, uniformly, whichever way round and whether or not the offer carries a
+# blinded path. The matrix is four cells because a single case at low reps
+# produced a confident and entirely false asymmetry.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
@@ -75,7 +75,8 @@ step "offer-latency: the matrix"
 echo
 echo "  Both nodes fall back to a blinded path starting at themselves, because"
 echo "  in a two-node lab neither has a peer that could be an introduction node"
-echo "  for the other. That fallback is not the variable; the matrix is."
+echo "  for the other. That fallback fires in every cell, so it is not the"
+echo "  variable here -- and at 20 reps neither is anything else in the matrix."
 echo
 printf "  %-28s %-16s %s\n" "case" "with_paths" "no_paths"
 printf "  %-28s %-16s %s\n" "----" "----------" "--------"
