@@ -24,7 +24,7 @@ LND_TAGS ?= autopilotrpc signrpc walletrpc chainrpc invoicesrpc watchtowerrpc pe
 export GOWORK := $(FORK_DIR)/go.work
 export ACTIVATION_HEIGHT ?= 20
 
-.PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup offer-latency cln4-split \
+.PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup offer-latency cln4-split cln-pytest \
 	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart bolt12
 
 build:
@@ -78,6 +78,11 @@ offer-latency:
 # reach each other. Same chain, and currently not the same Lightning network.
 # Needs the .4 image: make cln-release CLN_RELEASE=v26.06.7-blake2b.4 with the
 # tag overridden, see the script header.
+cln-pytest:
+	docker build -f Dockerfile.cln-pytest -t cln-pytest:lab .
+	docker run --rm --entrypoint python3 cln-pytest:lab -m pytest -q \
+		--timeout=600 -p no:cacheprovider $(PYTEST_ARGS)
+
 cln4-split:
 	@scripts/scenario-cln4-split.sh
 
