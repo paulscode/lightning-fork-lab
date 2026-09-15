@@ -1,0 +1,55 @@
+# Core Lightning's own python test suite, run against the chain-identity
+# series.
+#
+# The PR says the suite was not run and that ten files still assert `lnbcrt`.
+# That is a real gap and it cannot be closed by editing the tests blind: the
+# fixtures are signed BOLT 11 strings, so changing a prefix invalidates them,
+# and guessing at which assertions still hold is worse than admitting the suite
+# was not run. This image makes the answer checkable.
+#
+# It is deliberately the same builder as Dockerfile.cln-blake2b, plus bitcoind
+# and the python test dependencies, so that what the tests run against is the
+# build the lab already exercises.
+FROM ubuntu:24.04 AS builder
+ARG CLN_REPO=https://github.com/privkeyio/lightning
+# v26.06.7-blake2b.3, pinned by commit rather than by tag.
+ARG CLN_REF=24d0273100c75eac99e0400f767267efde4b012c
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        autoconf automake build-essential git libtool libsqlite3-dev \
+        python3 python3-pip python3-mako net-tools zlib1g-dev libsodium-dev \
+        gettext protobuf-compiler jq pkg-config libpq-dev ca-certificates lowdown \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --break-system-packages uv grpcio-tools
+RUN git clone "$CLN_REPO" /src && git -C /src checkout -q "$CLN_REF"
+WORKDIR /src
+COPY build/cln-patches-none/ /patches/
+RUN git config user.email lab@example.invalid && git config user.name lab \
+    && (ls /patches/*.patch >/dev/null 2>&1 && git am /patches/*.patch || true) \
+    && ./configure --disable-rust --disable-valgrind \
+    && make -j"$(nproc)"
+
+# The suite drives a real bitcoind, so it needs the chain's own build, and a
+# copied binary needs the libraries it was linked against. Installed after the
+# CLN build so that adding one does not invalidate that layer.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libzmq5 libevent-2.1-7 libevent-core-2.1-7 libevent-extra-2.1-7 \
+        libevent-pthreads-2.1-7 libminiupnpc17 libnatpmp1 libdb5.3++ \
+    && rm -rf /var/lib/apt/lists/*
+COPY build/bitcoind /usr/local/bin/bitcoind
+COPY build/bitcoin-cli /usr/local/bin/bitcoin-cli
+RUN bitcoind --version | head -1 && bitcoin-cli --version | head -1
+
+# pyln-testing and what it pulls in. Installed from the tree so the versions
+# match the source the tests came from.
+RUN pip3 install --break-system-packages \
+        pytest pytest-xdist pytest-timeout psycopg2-binary \
+        ./contrib/pyln-client ./contrib/pyln-testing ./contrib/pyln-proto \
+    || pip3 install --break-system-packages pytest pytest-xdist pytest-timeout
+
+ENV SOURCE_CHECK_ONLY=0
+ENV TEST_NETWORK=regtest
+ENV SLOW_MACHINE=1
+ENV TEST_DEBUG=1
+WORKDIR /src
+ENTRYPOINT ["python3", "-m", "pytest", "-x", "-v", "--timeout=900"]
