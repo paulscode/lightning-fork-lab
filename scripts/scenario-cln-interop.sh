@@ -38,7 +38,7 @@ lf1_pub=$(pubkey_of lf1)
 lf2_pub=$(pubkey_of lf2)
 cln_pub=$(cln getinfo | jq -r .id)
 # The chain-identity series adds this option; an unpatched node lacks it.
-cln listconfigs | jq -e '.configs["allow-peers-without-networks"]' >/dev/null || fail "cln is not the patched build"
+cln listconfigs | jq -e '.configs["drop-peers-without-networks"]' >/dev/null || fail "cln is not the patched build"
 pass "lf1 $lf1_pub, cln $cln_pub ($(cln getinfo | jq -r .version), chain identity applied)"
 
 step "cln-interop: peering both ways"
@@ -59,11 +59,26 @@ step "cln-interop: a stock lnd, which names no networks, is dropped"
 sha_pub=$(pubkey_of lnd-sha)
 lndsha connect "$cln_pub@$CLN_HOST:9735" >/dev/null 2>&1 || true
 sleep 3
-if lndsha listpeers | jq -e ".peers[] | select(.pub_key == \"$cln_pub\")" >/dev/null; then
-	fail "cln kept a peer that names no networks"
+# A peer that names no networks is now kept by default. It cannot do
+# anything: open_channel and channel_announcement both carry chain_hash, so
+# a node of the other chain is refused where it matters. Dropping it at init
+# only made the failure earlier, and it also dropped client applications that
+# speak the wire protocol to reach the node's RPC and have no reason to name
+# a chain, which is why it became opt-in.
+[ "$(cln listconfigs | jq -r '.configs["drop-peers-without-networks"].set')" = false ] \
+	|| fail "drop-peers-without-networks is not off by default"
+if docker logs --since 60s "$CLN_CONTAINER" 2>&1 | grep -q "names no networks"; then
+	fail "cln dropped lnd-sha at init; that is now opt-in"
 fi
-docker logs --since 30s "$CLN_CONTAINER" 2>&1 | grep -q "Peer names no networks" || fail "cln did not say why it dropped lnd-sha"
-pass "lnd-sha dropped at init"
+# The connection still does not survive, and this is the point: it dies one
+# layer further in, on chain_hash, which is what actually separates the two
+# chains. lnd-sha sends a gossip_timestamp_filter carrying Bitcoin's
+# chain_hash and Core Lightning refuses it. open_channel carries chain_hash
+# too, so there is nothing a node of the other chain can do here whether or
+# not it was dropped at init.
+docker compose logs --since 60s lnd-sha 2>&1 | grep -q "bad chain" \
+	|| fail "lnd-sha was not refused on chain_hash either, which is the isolation"
+pass "lnd-sha kept at init and refused on chain_hash, where it counts"
 
 step "cln-interop: funding the Core Lightning wallet"
 if [ "$(cln listfunds | jq '[.outputs[] | select(.status == "confirmed")] | length')" = 0 ]; then

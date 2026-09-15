@@ -12,7 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-mako net-tools zlib1g-dev libsodium-dev \
         gettext protobuf-compiler jq pkg-config libpq-dev ca-certificates lowdown \
     && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --break-system-packages uv
+    && pip3 install --break-system-packages uv grpcio-tools
+# grpcio-tools because the chain-identity series edits cln-grpc/proto/node.proto,
+# and git am does not promise to write a .proto before the stubs generated from
+# it, so make sometimes decides they are stale and regenerates them.
 RUN git clone "$CLN_REPO" /src && git -C /src checkout -q "$CLN_REF"
 WORKDIR /src
 COPY build/cln-patches/ /patches/
