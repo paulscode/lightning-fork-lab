@@ -24,7 +24,7 @@ LND_TAGS ?= autopilotrpc signrpc walletrpc chainrpc invoicesrpc watchtowerrpc pe
 export GOWORK := $(FORK_DIR)/go.work
 export ACTIVATION_HEIGHT ?= 20
 
-.PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios \
+.PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup \
 	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart bolt12
 
 build:
@@ -67,6 +67,11 @@ lndsha:
 # reorg goes last: it replaces the chain from below the activation height,
 # which voids every coin and channel funded before it (lnd keeps the
 # channels open and the wallet keeps the coins; see the plan's note).
+# bridge-setup stands up the channels a cross-chain swap needs, on both chains,
+# and exports the credentials the bridge's live test connects with.
+bridge-setup:
+	@scripts/bridge-setup.sh
+
 scenarios: e3-sync e4b-refuse e4-isolation e7-replay channel restart bolt12 reorg
 	@echo "ALL SCENARIOS PASSED"
 

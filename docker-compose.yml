@@ -199,6 +199,36 @@ services:
       - lnd-sha-data:/root/.lnd
     networks: [lab]
 
+
+  # A second Bitcoin Lightning node, so the bridge has somewhere to pay.
+  # The swap needs a real destination on the outgoing chain: with only one
+  # node there, every payment is a self-payment and the interesting half of
+  # the mechanism never runs.
+  lnd-sha2:
+    image: lightninglabs/lnd:v0.21.3-beta
+    restart: "no"
+    depends_on:
+      bitcoind-sha:
+        condition: service_healthy
+    command:
+      - --noseedbackup
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoind.rpchost=bitcoind-sha:18443
+      - --bitcoind.rpcuser=lab
+      - --bitcoind.rpcpass=lab
+      - --bitcoind.zmqpubrawblock=tcp://bitcoind-sha:28332
+      - --bitcoind.zmqpubrawtx=tcp://bitcoind-sha:28333
+      - --rpclisten=0.0.0.0:10009
+      - --listen=0.0.0.0:9735
+      - --externalip=lnd-sha2:9735
+      - --tlsextradomain=lnd-sha2
+      - --alias=lnd-sha2
+      - --debuglevel=info,PEER=debug
+    volumes:
+      - lnd-sha2-data:/root/.lnd
+    networks: [lab]
+
   # Core Lightning with the BLAKE2b chain identity (see Dockerfile.cln-blake2b),
   # for the interop scenario. Started with `make cln`.
   cln:
@@ -238,4 +268,5 @@ volumes:
   lf-bad-data:
   lf-bad-status:
   lnd-sha-data:
+  lnd-sha2-data:
   cln-data:

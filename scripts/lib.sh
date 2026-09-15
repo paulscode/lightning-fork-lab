@@ -15,6 +15,7 @@ lncli_on() { local svc=$1; shift; $COMPOSE exec -T "$svc" lncli --network=regtes
 lf1()   { lncli_on lf1 "$@"; }
 lf2()   { lncli_on lf2 "$@"; }
 lndsha(){ lncli_on lnd-sha "$@"; }
+lndsha2(){ lncli_on lnd-sha2 "$@"; }
 
 # status_file SERVICE -> prints the chain-identity.json of a Lightning Fork
 # container, or nothing if it does not exist yet.
@@ -113,4 +114,40 @@ retry_pay() {
         sleep 3
     done
     lncli_on "$svc" "$@"
+}
+
+# fund_sha puts spendable coins in a Bitcoin-side node's wallet. The mirror of
+# fund_lf, for the chain the bridge pays out on.
+ensure_sha_funds() {
+    local need=$1
+    sha -rpcwallet=lab getbalance >/dev/null 2>&1 || \
+        sha createwallet lab >/dev/null 2>&1 || \
+        sha loadwallet lab >/dev/null 2>&1 || true
+    local have; have=$(sha -rpcwallet=lab getbalance 2>/dev/null || echo 0)
+    if awk "BEGIN{exit !($have < $need)}"; then
+        mine_sha 101
+    fi
+}
+
+fund_sha() {
+    local svc=$1 amt=$2
+    ensure_sha_funds "$amt"
+    local addr; addr=$(lncli_on "$svc" newaddress p2tr | jq -r .address)
+    sha -rpcwallet=lab sendtoaddress "$addr" "$amt" >/dev/null
+    mine_sha 6
+    wait_for "$svc to see funds" 60 sh -c "[ \"\$($COMPOSE exec -T $svc lncli --network=regtest --rpcserver=127.0.0.1:10009 walletbalance | jq -r .confirmed_balance)\" != 0 ]"
+}
+
+# open_channel opens from one node to another and waits for it to go active on
+# both sides, mining on whichever chain they are on.
+open_channel() {
+    local from=$1 to=$2 amt=$3 chain=$4
+    local to_pub; to_pub=$(pubkey_of "$to")
+    lncli_on "$from" connect "$to_pub@$to:9735" >/dev/null 2>&1 || true
+    wait_for "$from<->$to connected" 30 sh -c "$COMPOSE exec -T $from lncli --network=regtest --rpcserver=127.0.0.1:10009 listpeers | jq -e '.peers[] | select(.pub_key == \"$to_pub\")' >/dev/null"
+    lncli_on "$from" openchannel --node_key="$to_pub" --local_amt="$amt" >/dev/null
+    if [ "$chain" = b2b ]; then mine_b2b 6; else mine_sha 6; fi
+    for side in "$from" "$to"; do
+        wait_for "channel active on $side" 90 sh -c "[ \"\$($COMPOSE exec -T $side lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" != 0 ]"
+    done
 }
