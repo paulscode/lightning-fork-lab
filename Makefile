@@ -24,7 +24,7 @@ LND_TAGS ?= autopilotrpc signrpc walletrpc chainrpc invoicesrpc watchtowerrpc pe
 export GOWORK := $(FORK_DIR)/go.work
 export ACTIVATION_HEIGHT ?= 20
 
-.PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup \
+.PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup offer-latency \
 	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart bolt12
 
 build:
@@ -69,6 +69,11 @@ lndsha:
 # channels open and the wallet keeps the coins; see the plan's note).
 # bridge-setup stands up the channels a cross-chain swap needs, on both chains,
 # and exports the credentials the bridge's live test connects with.
+# offer-latency measures what the fetch-first payout design costs: how long a
+# BOLT 12 invoice fetch takes, and the smallest payer timeout it fits inside.
+offer-latency:
+	@scripts/scenario-offer-latency.sh
+
 bridge-setup:
 	@scripts/bridge-setup.sh
 
