@@ -52,9 +52,14 @@ try() {
 
 	for i in $(seq 1 "$reps"); do
 		local t0 t1
+		# Paced, because the issuer allows one request per second per
+		# peer after a burst of five. Without this the matrix measures
+		# the rate limiter and reports it as loss, which is exactly the
+		# mistake that produced the first version of this script.
+		[ "$i" = 1 ] || sleep 1.1
 		t0=$(now_ms)
 		if lncli_on "$fetcher" offer fetchinvoice "$lno" \
-			--amount_msat 123000 --timeout_seconds 10 \
+			--amount_msat 123000 --timeout 10 \
 			--payer_note "matrix $i" >/dev/null 2>&1; then
 			t1=$(now_ms)
 			ok=$((ok + 1))
@@ -102,31 +107,23 @@ cat <<EOF
   roughly a tenth of a second, against a 60s payer timeout in our own
   implementation. The round trip is not what would break this.
 
-  Whether the fetch succeeds is the risk. At 20 reps the measured rate was
-  17/20 in all four cells: about 15% of fetches fail, and the rate does not
-  move with direction or with whether the offer carries a blinded path.
+  Whether the fetch succeeds was the risk, and the answer turned out to be
+  about this script as much as about the code. An earlier version passed
+  --timeout_seconds, which lncli does not have for fetchinvoice; the flag is
+  --timeout. Every fetch silently used the 60s default, and the uniform "15%
+  failure" it reported across all four cells was the issuer's own per-peer
+  rate limiter: a burst of five, then one per second. Uniform across
+  direction and blinded paths because a rate limiter cares about neither.
 
-  Run this with enough reps. At 5 reps an earlier run showed with_paths
-  passing and no_paths failing, and that reading was pure small-sample
-  noise -- there is no such asymmetry. One cell of five tells you nothing.
+  The limiting was correct. The silence was not: a requester that gets
+  nothing cannot tell rate limiting from the issuer being offline, so it
+  waited out a full timeout for something decided in microseconds. The
+  server now answers the first over-limit request with an invoice_error and
+  stays quiet for the rest of the window, so the same case fails in about a
+  tenth of a second with a reason. See offerserve/server.go.
 
-  A 15% failure rate is not only the payout design's problem. Offer fetching
-  ships today, so this is live. For the fetch-first design specifically it
-  means roughly one payout in seven stalls with OCEAN waiting, which is a
-  recurring operational cost rather than a one-off.
-
-  Suspected cause, not yet proven: offerpay.deliver() drops a reply whose
-  path_id is not exactly 32 bytes, and it does so with no log at all --
-
-      if len(msg.PathID) != 32 {
-              return
-      }
-
-  The trace is consistent with this. On a failing fetch the messenger logs
-  "Delivering onion message to self" and then nothing, and in particular the
-  "Reply from peer ... for no pending fetch" line just below never fires. So
-  the reply arrives and is discarded before reaching the matcher. Confirming
-  that needs a log line at the drop and a rebuild.
+  If a cell below is not REPS/REPS, check the pace before suspecting loss:
+  requests faster than one per second per peer are supposed to be refused.
 
   Still unmeasured, because they need an OCEAN account: how long OCEAN waits
   for an invoice reply (S16), and how long it takes to pay one (S17).
