@@ -54,6 +54,23 @@ else
     pass "lnd-sha already has an active channel"
 fi
 
+# The reverse direction needs the Bitcoin-side user to be able to send, and a
+# node that has only ever received cannot: lnd-sha2 opens with nothing of its
+# own and the channel reserve is 10,000 sat, so a balance below that is
+# unspendable and a payment fails with INSUFFICIENT_BALANCE rather than
+# anything about the swap. Push it some once.
+step "bridge: give lnd-sha2 something to spend, for the reverse direction"
+spendable=$(lndsha2 listchannels \
+    | jq '[.channels[] | select(.active) | (.local_balance|tonumber) - (.local_chan_reserve_sat|tonumber)] | max // 0')
+if [ "${spendable:-0}" -lt 20000 ]; then
+    inv=$(lndsha2 addinvoice --amt 60000 | jq -r .payment_request)
+    lndsha payinvoice --force "$inv" >/dev/null 2>&1 || true
+    sleep 3
+    pass "lnd-sha2 can now send, so it can act as the user paying into the bridge"
+else
+    pass "lnd-sha2 already has $spendable sat above its reserve"
+fi
+
 step "bridge: export credentials"
 out=${BRIDGE_CREDS:-/tmp/bridge-lab}
 mkdir -p "$out"
@@ -72,6 +89,11 @@ cat <<EOF
 Credentials in $out. Run the swap with:
 
   cd /mnt/Black/lightning-fork-bridge
-  BRIDGE_LAB=$out go test -run TestLiveSwap -v ./bridgetest/
+  BRIDGE_LAB=$out go test -run TestLive -v ./bridgetest/
+
+Both directions are covered: TestLiveSwap pays a Bitcoin invoice from the
+BLAKE2b chain, TestLiveReverseSwap pays a BLAKE2b invoice from Bitcoin, and
+TestLiveRefund checks the user gets their money back when the outgoing leg
+cannot be delivered.
 
 EOF
