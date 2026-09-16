@@ -126,11 +126,41 @@ hash_byte_of() {
 
 step "unified: cooperative close"
 cp=$(lf1 listchannels | jq -r ".channels[] | select(.remote_pubkey == \"$cln_pub\") | .channel_point" | head -1)
-out=$(lf1 closechannel --funding_txid "${cp%%:*}" --output_index "${cp##*:}" 2>&1 || true)
-ctx=$(echo "$out" | grep -oE '[a-f0-9]{64}' | tail -1)
-sleep 15; mine_b2b 6 >/dev/null 2>&1; sleep 10
-echo "  closing tx $ctx, hash type byte: $(hash_byte_of "$ctx")"
-record unified coop_close "$(hash_byte_of "$ctx")"
+
+# `closechannel` without --force blocks until the close confirms, and the
+# close cannot confirm until something mines. Run it in the background and
+# mine underneath it, rather than waiting for a block that is waiting for us.
+# It can also stall in CLOSINGD_SIGEXCHANGE when the two sides disagree about
+# the fee, which on this regtest is a lab problem rather than a channel one,
+# so give it a bound and say so instead of hanging.
+: >/tmp/unified-coop.out
+( lf1 closechannel --funding_txid "${cp%%:*}" --output_index "${cp##*:}" \
+	>/tmp/unified-coop.out 2>&1 || true ) &
+coop_pid=$!
+ctx=""
+for i in $(seq 1 24); do
+	mine_b2b 1 >/dev/null 2>&1 || true
+	ctx=$(grep -oE '[a-f0-9]{64}' /tmp/unified-coop.out 2>/dev/null | tail -1)
+	if [ -n "$ctx" ] && [ "$(hash_byte_of "$ctx")" != "" ]; then
+		break
+	fi
+	sleep 10
+done
+kill $coop_pid 2>/dev/null || true
+wait $coop_pid 2>/dev/null || true
+
+if [ -z "$ctx" ]; then
+	echo "  no closing tx after 4 minutes; channel state:"
+	cli listpeerchannels | jq -c '[.channels[] | .state]'
+	echo "  CLOSINGD_SIGEXCHANGE here is the lab fee negotiation, not the"
+	echo "  channel type: see the fees service in docker-compose.yml."
+	record unified coop_close stalled
+	coop_byte=stalled
+else
+	coop_byte=$(hash_byte_of "$ctx")
+	echo "  closing tx $ctx, hash type byte: $coop_byte"
+	record unified coop_close "$coop_byte"
+fi
 
 step "unified: force close"
 lf1 connect "$cln_pub@$NODE:9735" >/dev/null 2>&1 || true
@@ -148,7 +178,7 @@ echo "  commitment tx $ftx, hash type byte: $(hash_byte_of "$ftx")"
 record unified force_close "$(hash_byte_of "$ftx")"
 
 step "unified: verdict"
-coop=$(hash_byte_of "$ctx"); force=$(hash_byte_of "$ftx")
+coop=$coop_byte; force=$(hash_byte_of "$ftx")
 if [ "$peered" != 0 ] && [ "$st" = ok ] && [ "$st2" = ok ] \
 	&& [ "$coop" = 21 ] && [ "$force" = 21 ]; then
 	cat <<EOF
