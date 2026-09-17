@@ -5,30 +5,30 @@
 # their build. This answers the same question by changing ours instead, which
 # is the half we control:
 #
-#   bit 68   option_blake2b, sent as even. lnd refuses an unknown even bit, so
-#            naming it in lnwire is enough to stop refusing them. We set the
-#            odd form (69) rather than the even one.
+#   bit 68   option_blake2b, sent as even by both builds. lnd refuses an
+#            unknown even bit, so naming it in lnwire is what stops this node
+#            refusing them. Lightning Fork sent the odd form (69) until the
+#            chain_hash reversal made that pointless, and now sends 68 like
+#            they do; scenario-chain-separation.sh is about that bit.
 #
 #   bit 70   option_unified_sigs, inside channel_type. Their build requires it
 #            on new channels, so a peer that cannot negotiate it is told
-#            "Did not support channel_type [12,22]". Lightning Fork now
-#            negotiates it.
+#            "Did not support channel_type [12,22]". Lightning Fork
+#            negotiates it, on every channel type it opens.
 #
-# The Core Lightning side here is upstream/blake2b-unified plus the
-# chain-identity series, the same cln-unified-run:asis image that
-# scenario-bit68.sh shows refusing to peer at all.
+# The Core Lightning side is cln-vanilla:lab: blake2b-unified at 24d027310
+# with nothing applied on top, the commit recorded in the image at
+# /cln-commit. That matters because "their node computed this signature" is
+# the whole value of a scenario like this one, and it cannot be claimed from a
+# build carrying my own patches.
 #
-# Earlier wording called that "UNMODIFIED", which it is not: the series is mine.
-# Nothing about the 0x21 result below depends on the series, which touches chain
-# identity and not signing, so the finding stands. But "their node computed this
-# signature" is the whole value of a scenario like this one, and it cannot be
-# claimed from a build carrying my patches. cln-vanilla:lab is that commit with
-# nothing applied, and scenario-htlc-sighash.sh uses it for exactly this reason.
-#
-# Since Lightning Fork adopted the chain_hash reversal this image no longer
-# peers with it at all: the series gives regtest a chain_hash of
-# 2594d57b...ab1a while lf1 now advertises the shared genesis 0f9188f1...2206.
-# Re-running this scenario needs cln-vanilla:lab via IMG.
+# It used to run against cln-unified-run:asis, which is that commit plus my
+# chain-identity series, and the header used to call that "UNMODIFIED". It was
+# not. Nothing about the 0x21 results depends on the series, which touches
+# chain identity and not signing, so those findings stood; the wording did
+# not. That image also cannot peer with this node any more, since the series
+# gives regtest a chain_hash of 2594d57b...ab1a while lf1 advertises the
+# shared genesis 0f9188f1...2206.
 #
 # What is checked, in the order money would be at risk:
 #   peer -> open -> negotiated type -> pay both ways -> coop close -> force

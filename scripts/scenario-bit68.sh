@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# HISTORICAL, 2026-09-17: this scenario no longer runs against a current lf1.
+#
+# All three images below carry my chain-identity series, which gives regtest a
+# chain_hash of 2594d57b...ab1a. Since Lightning Fork adopted the reversal it
+# advertises the shared genesis 0f9188f1...2206, so every one of them now hangs
+# up at init with "no common chain" before reaching the question this scenario
+# asks. The failure would look like a bit 68 problem and would not be one.
+#
+# It is kept because its answer is still the reason the current behaviour is
+# what it is, and because rebuilding the three images without the series would
+# change what is being compared. scenario-unified-sigs.sh is the live version
+# of this question, against a build with nothing of mine applied, and
+# scenario-chain-separation.sh covers bit 68 itself.
+#
 # What actually stops Core Lightning and Lightning Fork forming one network?
 #
 # They follow the same chain. There are three candidate barriers and the only

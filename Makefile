@@ -25,7 +25,9 @@ export GOWORK := $(FORK_DIR)/go.work
 export ACTIVATION_HEIGHT ?= 20
 
 .PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup offer-latency cln4-split cln-pytest \
-	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart bolt12
+	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart bolt12 \
+	identity chain-separation prefix-offers named-channel-type gossip-height \
+	unified-sigs restamp htlc-sighash cln-vanilla
 
 build:
 	mkdir -p bin
@@ -124,6 +126,59 @@ restart:
 
 bolt12:
 	bash scripts/scenario-bolt12.sh
+
+# The chain-identity scenarios. These guard claims that are made publicly, in
+# docs/blake2b-chain-identity.md and on the two upstream PRs, so they are worth
+# running as a set rather than by hand when something nearby changes. Ordered
+# cheapest first; the whole set is roughly an hour, most of it in htlc-sighash,
+# which mines several hundred blocks waiting for HTLC timeouts.
+#
+# cln-vanilla is a prerequisite for all but chain-separation and
+# named-channel-type: it is privkeyio's build with nothing of ours applied,
+# which is the only thing that makes "their node computed this" checkable.
+identity: chain-separation prefix-offers named-channel-type gossip-height \
+	unified-sigs restamp htlc-sighash
+	@echo "ALL CHAIN-IDENTITY SCENARIOS PASSED"
+
+# option_blake2b, bit 68, is the only thing separating the two chains at init
+# now that chain_hash is shared. About two minutes.
+chain-separation:
+	bash scripts/scenario-chain-separation.sh
+
+# The invoice prefix separates BOLT 11 in both directions; nothing separates
+# BOLT 12. Needs cln-vanilla. About three minutes.
+prefix-offers:
+	bash scripts/scenario-prefix-offers.sh
+
+# A channel opened by naming its commitment type must be bound to this chain,
+# like one opened by letting the nodes choose. Two coop closes, so ten minutes.
+named-channel-type:
+	bash scripts/scenario-named-channel-type.sh
+
+# The gossip floor at the activation height, with a control either side of it.
+gossip-height:
+	bash scripts/scenario-gossip-height.sh
+
+# Peering, channel type and both closes against privkeyio's build with nothing
+# of ours applied. Needs cln-vanilla.
+unified-sigs:
+	bash scripts/scenario-unified-sigs.sh
+
+# Why Core Lightning's restamp check cannot fire after the reversal. Uses the
+# patched image on purpose; see the script.
+restamp:
+	bash scripts/scenario-restamp.sh
+
+# 0xa3 on a second-level HTLC, confirmed on chain, with the remote half
+# computed by privkeyio's build. Needs cln-vanilla. Twenty-five minutes; set
+# SKIP_A=1 to run only the interop half.
+htlc-sighash:
+	bash scripts/scenario-htlc-sighash.sh
+
+# privkeyio's blake2b-unified at 24d027310 with nothing applied on top. The
+# image records the commit at /cln-commit and the build refuses a dirty tree.
+cln-vanilla:
+	docker build -f Dockerfile.cln-vanilla -t cln-vanilla:lab .
 
 # Core Lightning with the BLAKE2b chain identity: the privkeyio port plus the
 # patch series in the fork repository, built from source (minutes).

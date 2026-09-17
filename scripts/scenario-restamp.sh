@@ -29,6 +29,11 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 N=$(docker network ls --format '{{.Name}}' | grep -m1 lightning-fork-lab)
 NODE=cln-restamp
+# The patched image on purpose, unlike the other scenarios here, which use
+# cln-vanilla:lab. The subject is the restamp check, and the restamp check is
+# part of my chain-identity series, so the build under test has to carry it.
+# Nothing below peers with another node, so the fact that this image can no
+# longer peer with lf1 does not matter here.
 IMG=cln-unified-run:asis
 DB=/data/regtest/lightningd.sqlite3
 
