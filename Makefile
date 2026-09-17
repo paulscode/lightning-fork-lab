@@ -27,7 +27,7 @@ export ACTIVATION_HEIGHT ?= 20
 .PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup offer-latency cln4-split cln-pytest \
 	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart bolt12 \
 	identity chain-separation prefix-offers named-channel-type gossip-height \
-	unified-sigs restamp htlc-sighash cln-vanilla
+	unified-sigs restamp htlc-sighash chain-hash-migration cln-vanilla
 
 build:
 	mkdir -p bin
@@ -174,6 +174,13 @@ restamp:
 # SKIP_A=1 to run only the interop half.
 htlc-sighash:
 	bash scripts/scenario-htlc-sighash.sh
+
+# A channel opened by the v0.21.3-beta-blake2b.9 release, under the chain_hash
+# that release advertised, must survive an upgrade to a build that advertises
+# the genesis hash. Needs the released image; pulls it if absent. Fifteen
+# minutes.
+chain-hash-migration:
+	bash scripts/scenario-chain-hash-migration.sh
 
 # privkeyio's blake2b-unified at 24d027310 with nothing applied on top. The
 # image records the commit at /cln-commit and the build refuses a dirty tree.
