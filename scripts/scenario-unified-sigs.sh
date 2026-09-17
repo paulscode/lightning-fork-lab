@@ -107,24 +107,44 @@ record unified channel "$ctype"
 pass "channel open, type $ctype"
 
 step "unified: pay both ways"
+# Against an unmodified build this does not succeed, and the reason is the
+# finding rather than a fault. Their build keeps `bcrt` as its lightning_hrp
+# and mints lnbcrt invoices; this one uses lnblakert. Each side refuses the
+# other's invoice on the prefix, before any route is considered.
+#
+# So two nodes that peer, negotiate option_unified_sigs, gossip, and close both
+# ways cannot pay each other. The channel is fine. The string a user pastes is
+# what is broken, and it is the open question in the reply on the PR.
+#
+# An earlier version of this scenario ran the payment against a Core Lightning
+# built with my own prefix patch, where both sides said lnblakert and it
+# passed. That measured my patch talking to itself.
 inv=$(cli invoice 50000000 uni-$RANDOM "unified" | jq -r .bolt11)
-st=failed
-for i in $(seq 1 8); do
-	lf1 payinvoice --force "$inv" 2>&1 | grep -qi SUCCEEDED && { st=ok; break; }
-	sleep 8
-done
+echo "  their invoice  : ${inv:0:22}..."
+out=$(lf1 payinvoice --force --timeout 60s "$inv" 2>&1 || true)
+if echo "$out" | grep -qi SUCCEEDED; then
+	st=ok
+elif echo "$out" | grep -qi "prefix"; then
+	st=refused-by-prefix
+else
+	st=failed
+fi
 echo "  Lightning Fork -> Core Lightning : $st"
+[ "$st" = refused-by-prefix ] && echo "    $(echo "$out" | tail -1)"
 record unified pay_out "$st"
 
 inv=$(lf1 addinvoice --amt 20000 | jq -r .payment_request)
-st2=failed
-for i in $(seq 1 8); do
-	# `pay` prints progress lines beginning with # ahead of its JSON.
-	s=$(cli pay "$inv" 2>/dev/null | grep -v '^#' | jq -r .status 2>/dev/null || echo failed)
-	[ "$s" = complete ] && { st2=ok; break; }
-	sleep 8
-done
+echo "  our invoice    : ${inv:0:22}..."
+out2=$(cli pay "$inv" 2>&1 | grep -v '^#' || true)
+if [ "$(echo "$out2" | jq -r .status 2>/dev/null)" = complete ]; then
+	st2=ok
+elif echo "$out2" | grep -qi "prefix"; then
+	st2=refused-by-prefix
+else
+	st2=failed
+fi
 echo "  Core Lightning -> Lightning Fork : $st2"
+[ "$st2" = refused-by-prefix ] && echo "    $(echo "$out2" | jq -r .message 2>/dev/null)"
 record unified pay_in "$st2"
 
 # hash_byte_of TXID: the trailing byte of the first witness signature, which
@@ -191,22 +211,43 @@ record unified force_close "$(hash_byte_of "$ftx")"
 
 step "unified: verdict"
 coop=$coop_byte; force=$(hash_byte_of "$ftx")
-if [ "$peered" != 0 ] && [ "$st" = ok ] && [ "$st2" = ok ] \
-	&& [ "$coop" = 21 ] && [ "$force" = 21 ]; then
+
+# What has to hold for the channel type to be working: they peer, the type
+# carries bit 70, and both closes put 0x21 in the witness. Payment is reported
+# but is not one of these, because with an unmodified build it cannot succeed
+# for a reason that has nothing to do with signing.
+ok=yes
+[ "$peered" != 0 ] || ok=no
+[ "$coop" = 21 ] || ok=no
+[ "$force" = 21 ] || ok=no
+case "$st:$st2" in
+ok:ok|refused-by-prefix:refused-by-prefix) ;;
+*) ok=no ;;
+esac
+
+if [ "$ok" = yes ]; then
 	cat <<EOF
 
   One network, with no change on their side.
 
-  The Core Lightning node in this run is the same image that
-  scenario-bit68.sh shows refusing to peer at all. Lightning Fork now
-  names bit 68 instead of refusing it, and negotiates bit 70 instead of
-  being refused for lacking it.
+  channel_type $ctype, and both closes confirmed with 0x21 in the witness,
+  which is SIGHASH_ALL|SIGHASH_UNIFIED. The signatures on this channel are
+  bound to this chain and cannot be replayed on the SHA256d one. Their node
+  computed half of each of those signatures.
 
-  channel_type $ctype, paid both ways, and both closes confirmed with
-  0x21 in the witness, which is SIGHASH_ALL|SIGHASH_UNIFIED. The
-  signatures on this channel are bound to this chain and cannot be
-  replayed on the SHA256d one.
+  Payments: $st out, $st2 in.
 EOF
+	if [ "$st" = refused-by-prefix ]; then
+		cat <<EOF
+
+  That is the state of things rather than a fault in this run. Their build
+  mints lnbcrt and this one mints lnblakert, so each refuses the other's
+  invoice on the prefix before a route is considered. Everything below the
+  invoice works: peering, channel_type, gossip, both closes. What two correct
+  nodes cannot currently do is pay each other, and settling the prefix is what
+  fixes it. That is the open question in the reply on privkeyio/lightning#1.
+EOF
+	fi
 else
 	cat <<EOF
 
@@ -216,6 +257,9 @@ else
   A close showing 01 means the channel fell back to plain SIGHASH_ALL:
   it works, but its signatures are not bound to this chain, which is the
   whole point of the channel type.
+
+  Payments must be ok in both directions or refused-by-prefix in both. One of
+  each means something other than the prefix is wrong.
 EOF
 	exit 1
 fi
