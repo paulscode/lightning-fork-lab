@@ -14,9 +14,21 @@
 #            "Did not support channel_type [12,22]". Lightning Fork now
 #            negotiates it.
 #
-# The Core Lightning side here is UNMODIFIED: upstream/blake2b-unified plus
-# only the chain-identity series, which is the same cln-unified-run:asis image
-# that scenario-bit68.sh shows refusing to peer at all.
+# The Core Lightning side here is upstream/blake2b-unified plus the
+# chain-identity series, the same cln-unified-run:asis image that
+# scenario-bit68.sh shows refusing to peer at all.
+#
+# Earlier wording called that "UNMODIFIED", which it is not: the series is mine.
+# Nothing about the 0x21 result below depends on the series, which touches chain
+# identity and not signing, so the finding stands. But "their node computed this
+# signature" is the whole value of a scenario like this one, and it cannot be
+# claimed from a build carrying my patches. cln-vanilla:lab is that commit with
+# nothing applied, and scenario-htlc-sighash.sh uses it for exactly this reason.
+#
+# Since Lightning Fork adopted the chain_hash reversal this image no longer
+# peers with it at all: the series gives regtest a chain_hash of
+# 2594d57b...ab1a while lf1 now advertises the shared genesis 0f9188f1...2206.
+# Re-running this scenario needs cln-vanilla:lab via IMG.
 #
 # What is checked, in the order money would be at risk:
 #   peer -> open -> negotiated type -> pay both ways -> coop close -> force
@@ -28,7 +40,7 @@ source "$(dirname "$0")/lib.sh"
 
 N=$(docker network ls --format '{{.Name}}' | grep -m1 lightning-fork-lab)
 NODE=cln-unified-peer
-IMG=cln-unified-run:asis
+IMG=${CLN_IMAGE:-cln-vanilla:lab}
 
 cli() { docker exec $NODE lightning-cli --network=regtest --lightning-dir=/data "$@"; }
 

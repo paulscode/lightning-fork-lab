@@ -1,0 +1,48 @@
+# privkeyio's blake2b-unified branch with nothing applied on top of it.
+#
+# Dockerfile.cln-unified-run builds the same commit plus a patch directory, and
+# every image from it is named for the patches rather than for the base. When a
+# claim is of the form "their node computed this signature", the build has to
+# be theirs and only theirs, and it has to be checkable from the image rather
+# than remembered. So: same base commit, no COPY of patches, no git am.
+#
+# The other candidate was cln-blake2b-release:lab, the v26.06.7-blake2b.3
+# release. It peers with a post-reversal Lightning Fork, but it negotiates a
+# channel without option_unified_sigs: the commitment comes out with 0x01
+# signatures, and a second-level HTLC on such a channel never reaches 0xa3.
+# This commit is 21 ahead of blake2b.4 and does negotiate it.
+FROM ubuntu:24.04 AS builder
+ARG CLN_REPO=https://github.com/privkeyio/lightning
+# blake2b-unified @ 24d027310 "connectd: stop requiring peers to advertise
+# blake2b bit 68", pinned by commit rather than by branch name.
+ARG CLN_REF=24d0273100c75eac99e0400f767267efde4b012c
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        autoconf automake build-essential git libtool libsqlite3-dev \
+        python3 python3-pip python3-mako net-tools zlib1g-dev libsodium-dev \
+        gettext protobuf-compiler jq pkg-config libpq-dev ca-certificates lowdown \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --break-system-packages uv grpcio-tools
+RUN git clone "$CLN_REPO" /src && git -C /src checkout -q "$CLN_REF"
+WORKDIR /src
+# Recorded in the image, so that what it was built from survives the tag.
+RUN git rev-parse HEAD > /cln-commit \
+    && test "$(cat /cln-commit)" = "$CLN_REF" \
+    && git status --porcelain | tee /cln-dirty \
+    && test ! -s /cln-dirty \
+    && ./configure --disable-rust --disable-valgrind \
+    && make -j"$(nproc)" \
+    && make install DESTDIR=/out
+
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsodium23 libsqlite3-0 libpq5 zlib1g ca-certificates jq curl python3 \
+        libevent-2.1-7 libevent-pthreads-2.1-7 libevent-extra-2.1-7 \
+    && rm -rf /var/lib/apt/lists/*
+COPY build/bitcoin-cli /usr/local/bin/bitcoin-cli
+COPY --from=builder /out/usr/local/ /usr/local/
+COPY --from=builder /cln-commit /cln-commit
+RUN lightningd --version && bitcoin-cli --version | head -1
+VOLUME /data
+EXPOSE 9735
+ENTRYPOINT ["lightningd"]
