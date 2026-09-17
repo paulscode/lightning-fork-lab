@@ -89,6 +89,11 @@ cln4-split:
 bridge-setup:
 	@scripts/bridge-setup.sh
 
+# The bridge running inside Lightning Fork rather than as a separate daemon.
+# Needs bridge-setup and pace-blocks first, and lf1 up with the bridge overlay.
+bridge:
+	@scripts/scenario-bridge.sh
+
 scenarios: e3-sync e4b-refuse e4-isolation e7-replay channel restart bolt12 reorg
 	@echo "ALL SCENARIOS PASSED"
 
