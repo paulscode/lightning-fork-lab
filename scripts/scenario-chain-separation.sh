@@ -10,9 +10,16 @@
 # The answer is option_blake2b as an *even* bit, 68. BOLT 9 obliges a peer that
 # does not know an even bit to close the connection, so a node that has not
 # been updated for this chain hangs up by itself, without knowing why and
-# without this node having to decide anything. That is the mechanism the spec
-# PR at lightning-blake2b/bolts#1 writes down, and privkeyio's build already
-# sets the same bit.
+# without this node having to decide anything.
+#
+# Note on where that bit stands, 2026-09-17. It was written into
+# lightning-blake2b/bolts#1 as a MUST, which is why this node moved to it, and
+# then removed from that PR the same afternoon when the PR was narrowed to
+# option_unified_sigs and the gossip rule. So it is not a specified bit at the
+# moment. It is still what both implementations do: privkeyio's released build
+# sets 68 and not 69, measured, and it is still the only thing separating the
+# two chains at init here. The test below does not depend on any of that; it
+# checks behaviour.
 #
 # This daemon sent the *odd* bit until the reversal, on the reasoning that
 # chain_hash was the real check and the bit was a courtesy. An odd bit is
@@ -51,7 +58,7 @@ supposed to disconnect."
 echo "$bits" | grep -q 69 && fail "bit 69 is set as well as 68; BOLT 9 gives
 the pair one meaning between them and a peer reading both cannot tell which
 was meant"
-pass "bit 68 only, which is what BOLT 9 requires of it"
+pass "bit 68 only, which is the form that can do this job"
 
 step "separation: a stock lnd on the SHA256d chain, connecting to this node"
 # The connection is made from their side deliberately. What is being tested is
