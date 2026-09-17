@@ -1,0 +1,46 @@
+# Turns lf1 into a bridge, for scenario-bridge.sh.
+#
+# Layered rather than folded into docker-compose.yml on purpose. The bridge
+# refuses to start when it cannot reach its Bitcoin Lightning node, which is
+# the behaviour that matters, and which would make `make up` depend on lnd-sha
+# being healthy for every unrelated scenario.
+#
+# lnd-sha's data volume is mounted read only, which is how the packaged builds
+# reach a Bitcoin LND too: the platform hands over the directory rather than
+# the operator pasting a macaroon.
+services:
+  lf1:
+    command:
+      - --noseedbackup
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoin.blake2b-activation-height=${ACTIVATION_HEIGHT:-20}
+      - --fee.url=http://fees:8080/fees.json
+      - --bitcoind.rpchost=knots-b2b:18443
+      - --bitcoind.rpcuser=lab
+      - --bitcoind.rpcpass=lab
+      - --bitcoind.zmqpubrawblock=tcp://knots-b2b:28332
+      - --bitcoind.zmqpubrawtx=tcp://knots-b2b:28333
+      - --rpclisten=0.0.0.0:10009
+      - --restlisten=0.0.0.0:8080
+      - --listen=0.0.0.0:9735
+      - --externalip=lf1:9735
+      - --tlsextradomain=lf1
+      - --alias=lf1
+      - --debuglevel=info,PEER=debug,CRTR=debug,FNDG=debug,BRPC=debug
+      - --protocol.simple-taproot-chans
+      - --accept-keysend
+      - --bridgerpc.enabled
+      - --bridgerpc.tobitcoin
+      - --bridgerpc.toblake2b
+      - --bridgerpc.bitcoin.rpchost=lnd-sha:10009
+      - --bridgerpc.bitcoin.tlscertpath=/mnt/lnd-sha/tls.cert
+      - --bridgerpc.bitcoin.macaroonpath=/mnt/lnd-sha/data/chain/bitcoin/regtest/admin.macaroon
+      # A rate that makes the arithmetic easy to check by eye: 1 BTC per
+      # BTCB2, so incoming and outgoing millisatoshis differ only by the
+      # spread. A real one is nowhere near this.
+      - --bridgerpc.fixedrate=1.0
+      - --bridgerpc.spread=0.01
+    volumes:
+      - lf1-data:/root/.lnd
+      - lnd-sha-data:/mnt/lnd-sha:ro
