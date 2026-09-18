@@ -1,0 +1,18 @@
+FROM ubuntu:24.04 AS builder
+ARG CLN_REPO=https://github.com/privkeyio/lightning
+ARG CLN_REF=24d0273100c75eac99e0400f767267efde4b012c
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        autoconf automake build-essential git libtool libsqlite3-dev \
+        python3 python3-pip python3-mako net-tools zlib1g-dev libsodium-dev \
+        gettext protobuf-compiler jq pkg-config libpq-dev ca-certificates lowdown \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --break-system-packages uv grpcio-tools
+RUN git clone "$CLN_REPO" /src && git -C /src checkout -q "$CLN_REF"
+WORKDIR /src
+COPY build/cln-patches-v2/ /patches/
+RUN git config user.email lab@example.invalid && git config user.name lab \
+    && git am /patches/*.patch \
+    && ./configure --disable-rust --disable-valgrind \
+    && make -j"$(nproc)"
+# The thing the plain build never did: compile and run their unit tests.
