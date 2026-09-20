@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Channel lifecycle between two Lightning Fork nodes on the BLAKE2b regtest:
-# open, pay both ways with lnblakert invoices and keysend, cooperative close,
+# open, pay both ways with lnbcrt invoices and keysend, cooperative close,
 # then a force close whose sweep confirms.
 source "$(dirname "$0")/lib.sh"
 
@@ -27,12 +27,12 @@ wait_for "channel active on lf2" 90 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --n
 cp=$(lf1 listchannels | jq -r '.channels[0].channel_point')
 pass "channel $cp active on both sides"
 
-step "channel: pay lf1 -> lf2 with a lnblakert invoice"
+step "channel: pay lf1 -> lf2 with a lnbcrt invoice"
 inv=$(lf2 addinvoice --amt 50000 --memo "lab" | jq -r .payment_request)
-[[ "$inv" == lnblakert* ]] || fail "invoice prefix wrong: $inv"
+[[ "$inv" == lnbcrt* ]] || fail "invoice prefix wrong: $inv"
 retry_pay lf1 payinvoice --force "$inv" >/dev/null
 wait_for "lf2 settled" 30 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 listinvoices | jq -r '.invoices[-1].state')\" = SETTLED ]"
-pass "lf2 settled a 50000 sat lnblakert invoice"
+pass "lf2 settled a 50000 sat lnbcrt invoice"
 
 step "channel: pay lf2 -> lf1 with keysend"
 retry_pay lf2 sendpayment --keysend --dest="$lf1_pub" --amt 20000 --force >/dev/null

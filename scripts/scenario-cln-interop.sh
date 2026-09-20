@@ -124,17 +124,17 @@ wait_for "lf1's graph has the cln node" 120 sh -c "$COMPOSE exec -T lf1 lncli --
 wait_for "cln's graph has lf2 (learned through lf1)" 180 sh -c "docker exec $CLN_CONTAINER lightning-cli --network=regtest --lightning-dir=/data listnodes | jq -e '.nodes[] | select(.nodeid == \"$lf2_pub\")' >/dev/null"
 pass "cln alias on lf1: $(lf1 describegraph | jq -r ".nodes[] | select(.pub_key == \"$cln_pub\") | .alias"); lf1 alias on cln: $(cln listnodes | jq -r ".nodes[] | select(.nodeid == \"$lf1_pub\") | .alias")"
 
-step "cln-interop: lf1 pays a Core Lightning invoice (lnblakert)"
+step "cln-interop: lf1 pays a Core Lightning invoice (lnbcrt)"
 label="lab-$(date +%s)"
 b11=$(cln invoice 100000 "$label" "from lf1" | jq -r .bolt11)
-[[ "$b11" == lnblakert* ]] || fail "cln invoice prefix: ${b11:0:12}"
+[[ "$b11" == lnbcrt* ]] || fail "cln invoice prefix: ${b11:0:12}"
 retry_pay lf1 payinvoice --force --json "$b11" >/dev/null
 [ "$(cln listinvoices "$label" | jq -r '.invoices[0].status')" = paid ] || fail "cln invoice not paid"
 pass "paid 100 sat to cln"
 
 step "cln-interop: Core Lightning pays an lf1 invoice"
 b11=$(lf1 addinvoice --amt 200 --memo "from cln" | jq -r .payment_request)
-[[ "$b11" == lnblakert* ]] || fail "lf1 invoice prefix: ${b11:0:12}"
+[[ "$b11" == lnbcrt* ]] || fail "lf1 invoice prefix: ${b11:0:12}"
 res=$(cln_pay "$b11") || fail "cln pay: $res"
 pass "cln paid 200 sat to lf1"
 

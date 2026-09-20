@@ -5,7 +5,9 @@
 #    networks list.
 #  - lf2 (lenient) keeps the connection but every channel open fails on the
 #    chain hash, in both directions.
-#  - Invoices do not cross: lf refuses lnbc..., stock lnd refuses lnblakert...
+#  - Invoices DO cross, and that is the recorded gap: the chain's own BOLT 11
+#    prefix was withdrawn and option_blake2b is not in the `9` field yet, so
+#    nothing in an invoice says which rule set it belongs to.
 source "$(dirname "$0")/lib.sh"
 
 wait_for "lnd-sha rpc" 120 lnd_ready lnd-sha
@@ -67,18 +69,23 @@ step "E4: invoices do not cross"
 sha_inv=$(lndsha addinvoice --amt 1000 | jq -r .payment_request)
 [[ "$sha_inv" == lnbcrt* ]] || fail "stock invoice is not lnbcrt...: $sha_inv"
 out=$(lf1 decodepayreq "$sha_inv" 2>&1 || true)
-echo "$out" | grep -q "SHA256" || { echo "$out"; fail "lf1 did not refuse the lnbcrt invoice by naming the SHA256 network"; }
-pass "lf1 refuses lnbcrt...: $(echo "$out" | head -1 | cut -c1-100)"
+echo "$out" | grep -q '"num_satoshis"' || { echo "$out"; fail "lf1 could not decode the lnbcrt invoice"; }
+pass "lf1 decodes lnbcrt...: the prefix no longer separates the chains"
 
 lf_inv=$(lf1 addinvoice --amt 1000 | jq -r .payment_request)
-[[ "$lf_inv" == lnblakert* ]] || fail "Lightning Fork invoice is not lnblakert...: $lf_inv"
+[[ "$lf_inv" == lnbcrt* ]] || fail "Lightning Fork invoice is not lnbcrt...: $lf_inv"
 out=$(lndsha decodepayreq "$lf_inv" 2>&1 || true)
-echo "$out" | grep -qi "not for current active network\|invalid\|error" || { echo "$out"; fail "stock lnd decoded a lnblakert invoice"; }
-pass "stock lnd refuses lnblakert...: $(echo "$out" | head -1 | cut -c1-100)"
+echo "$out" | grep -q '"num_satoshis"' || { echo "$out"; fail "stock lnd could not decode the lnbcrt invoice"; }
+pass "stock lnd decodes this chain's invoice too: the gap runs both ways"
 
+# The invoice decodes, so what stops the payment is no longer the prefix. It is
+# that the two graphs do not meet: option_blake2b keeps the nodes from peering
+# and the gossip floor keeps pre-activation channels out, so there is no route.
+# That is a weaker guarantee than an explicit refusal, and recording which one
+# is doing the work is the point of this step.
 out=$(lf1 payinvoice --force "$sha_inv" 2>&1 || true)
-echo "$out" | grep -q "SHA256" || { echo "$out"; fail "lf1 payinvoice of a lnbcrt invoice did not refuse on the network"; }
-pass "lf1 payinvoice refuses a SHA256d invoice"
+echo "$out" | grep -qi "route\|no path\|unable to find" || { echo "$out"; fail "expected the payment to fail for want of a route, not on the prefix"; }
+pass "payment fails for want of a route: the graphs separate them, not the prefix"
 
 step "E4: no gossip crossed"
 [ "$(lf2 describegraph | jq '.edges | length')" = 0 ] || fail "lf2 graph has edges from the SHA256d side"

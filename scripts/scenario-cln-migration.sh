@@ -65,8 +65,10 @@ for n in mig1 mig2; do
 done
 wait_for "mig1 synced" 120 synced mig1
 wait_for "mig2 synced" 120 synced mig2
-[ "$(c mig1 invoice 1000 y y | jq -r .bolt11 | cut -c1-9)" = lnblakert ] || fail "patched build should issue lnblakert"
-pass "both restamped, gossip stores removed, invoices lnblakert"
+# The patched build no longer changes the prefix: that was withdrawn, so an
+# invoice here carries the ordinary lnbcrt like any other regtest node.
+[ "$(c mig1 invoice 1000 y y | jq -r .bolt11 | cut -c1-6)" = lnbcrt ] || fail "patched build should issue lnbcrt"
+pass "both restamped, gossip stores removed, invoices lnbcrt"
 c mig1 connect "$mig2_pub@mig2:9735" >/dev/null 2>&1 || true
 wait_for "channel reestablished" 120 sh -c "[ \"\$(docker exec mig1 lightning-cli --network=regtest --lightning-dir=/data listpeerchannels | jq -r '.channels[0].state')\" = CHANNELD_NORMAL ]"
 # A fresh node on the patched build can only accept the channel under the

@@ -45,25 +45,29 @@ sha_inv=$(lncli_on lnd-sha addinvoice --amt 1000 2>/dev/null | jq -r .payment_re
 echo "  ${sha_inv:0:26}..."
 [[ "$sha_inv" == lnbcrt* ]] || fail "expected an lnbcrt invoice, got ${sha_inv:0:12}"
 
-if out=$(lf1 decodepayreq --pay_req "$sha_inv" 2>&1); then
-	fail "this node decoded a SHA256d invoice: $out"
+# The chain used to carry its own prefix and refused this string on it. That
+# was withdrawn: the prefix is BOLT 11's currency field, so giving the chain
+# one of its own says it is a different currency. What is meant to separate
+# invoices now is option_blake2b as an even bit in the `9` field, and neither
+# implementation sets it yet. So this decodes, and that is the gap.
+if ! out=$(lf1 decodepayreq --pay_req "$sha_inv" 2>&1); then
+	fail "expected the invoice to decode now that prefixes match: $out"
 fi
-echo "  refused: $(echo "$out" | tail -1)"
-record prefix sha_invoice_refused yes
-echo "$out" | grep -qi "prefix" || fail "the refusal does not name the prefix"
-pass "refused by prefix, naming both chains and what it expected"
+echo "  decoded: no prefix separation remains"
+record prefix sha_invoice_decoded yes
+pass "decoded, as expected: the prefix no longer tells the chains apart"
 
 step "prefix: an invoice from this chain, offered to an unmodified node"
 b2b_inv=$(lf1 addinvoice --amt 1000 2>/dev/null | jq -r .payment_request)
 [ -n "$b2b_inv" ] && [ "$b2b_inv" != null ] || fail "lf1 issued no invoice"
 echo "  ${b2b_inv:0:26}..."
-[[ "$b2b_inv" == lnblakert* ]] || fail "expected an lnblakert invoice, got ${b2b_inv:0:12}"
+[[ "$b2b_inv" == lnbcrt* ]] || fail "expected an lnbcrt invoice, got ${b2b_inv:0:12}"
 
-if out=$(lncli_on lnd-sha decodepayreq --pay_req "$b2b_inv" 2>&1); then
-	fail "stock lnd decoded a BLAKE2b invoice: $out"
+if ! out=$(lncli_on lnd-sha decodepayreq --pay_req "$b2b_inv" 2>&1); then
+	fail "expected stock lnd to decode this now: $out"
 fi
-echo "  refused: $(echo "$out" | tail -1)"
-record prefix b2b_invoice_refused yes
+echo "  decoded by stock lnd: the outward direction is open too"
+record prefix b2b_invoice_decoded yes
 # The point is not that the message is bad. It is that an unmodified node has
 # nothing to say here, and never will, because it predates this chain. A
 # shared prefix would replace this refusal with a payment.

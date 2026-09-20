@@ -109,7 +109,8 @@ pass "channel open, type $ctype"
 step "unified: pay both ways"
 # Against an unmodified build this does not succeed, and the reason is the
 # finding rather than a fault. Their build keeps `bcrt` as its lightning_hrp
-# and mints lnbcrt invoices; this one uses lnblakert. Each side refuses the
+# and mints lnbcrt invoices; so does this one, now that the chain's own
+# prefix has been withdrawn. Nothing in an invoice separates the
 # other's invoice on the prefix, before any route is considered.
 #
 # So two nodes that peer, negotiate option_unified_sigs, gossip, and close both
@@ -117,7 +118,7 @@ step "unified: pay both ways"
 # what is broken, and it is the open question in the reply on the PR.
 #
 # An earlier version of this scenario ran the payment against a Core Lightning
-# built with my own prefix patch, where both sides said lnblakert and it
+# built with the withdrawn prefix patch, where both sides said lnblakert and it
 # passed. That measured my patch talking to itself.
 inv=$(cli invoice 50000000 uni-$RANDOM "unified" | jq -r .bolt11)
 echo "  their invoice  : ${inv:0:22}..."
@@ -241,7 +242,7 @@ EOF
 		cat <<EOF
 
   That is the state of things rather than a fault in this run. Their build
-  mints lnbcrt and this one mints lnblakert, so each refuses the other's
+  mints lnbcrt and so does this one, so neither refuses the other's
   invoice on the prefix before a route is considered. Everything below the
   invoice works: peering, channel_type, gossip, both closes. What two correct
   nodes cannot currently do is pay each other, and settling the prefix is what
