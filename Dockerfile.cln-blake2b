@@ -4,8 +4,11 @@
 # copied into build/cln-patches by `make cln`.
 FROM ubuntu:24.04 AS builder
 ARG CLN_REPO=https://github.com/privkeyio/lightning
-# v26.06.7-blake2b.3, pinned by commit rather than by tag.
-ARG CLN_REF=c6d386ffac2b8465d918be24a8aa9a626e051a41
+# v26.06.7-blake2b.4 plus the inbound-requirement fix: the base the
+# chain-identity series targets. The previous pin, c6d386ff, was 50
+# commits earlier and predates OPT_BLAKE2B entirely, so it hung up on
+# bit 68 and no interop scenario could run against it.
+ARG CLN_REF=24d0273100c75eac99e0400f767267efde4b012c
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         autoconf automake build-essential git libtool libsqlite3-dev \

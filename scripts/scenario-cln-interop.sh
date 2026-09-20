@@ -37,8 +37,16 @@ wait_cln_synced
 lf1_pub=$(pubkey_of lf1)
 lf2_pub=$(pubkey_of lf2)
 cln_pub=$(cln getinfo | jq -r .id)
-# The chain-identity series adds this option; an unpatched node lacks it.
-cln listconfigs | jq -e '.configs["drop-peers-without-networks"]' >/dev/null || fail "cln is not the patched build"
+# The series makes listinvoices carry the reason a string failed to decode; an
+# unpatched node answers "Invalid invstring" with nothing after it. This used
+# to probe for a `drop-peers-without-networks` option, which only ever existed
+# in the first version of the series, so the check had been failing since that
+# was withdrawn and this scenario had not run since.
+patched_probe=$(cln listinvoices -k invstring=notaninvoice 2>&1 || true)
+case "$patched_probe" in
+*"Invalid invstring: "*) ;;
+*) fail "cln is not the patched build" ;;
+esac
 pass "lf1 $lf1_pub, cln $cln_pub ($(cln getinfo | jq -r .version), chain identity applied)"
 
 step "cln-interop: peering both ways"
@@ -55,30 +63,28 @@ res=$(cln connect "$lf1_pub@lf1:9735")
 [ "$(echo "$res" | jq -r .id)" = "$lf1_pub" ] || fail "cln connect: $res"
 pass "connected from each side (cln's connection is $(echo "$res" | jq -r .direction)bound)"
 
-step "cln-interop: a stock lnd, which names no networks, is dropped"
+step "cln-interop: a stock lnd hangs up on the even bit"
 sha_pub=$(pubkey_of lnd-sha)
 lndsha connect "$cln_pub@$CLN_HOST:9735" >/dev/null 2>&1 || true
-sleep 3
-# A peer that names no networks is now kept by default. It cannot do
-# anything: open_channel and channel_announcement both carry chain_hash, so
-# a node of the other chain is refused where it matters. Dropping it at init
-# only made the failure earlier, and it also dropped client applications that
-# speak the wire protocol to reach the node's RPC and have no reason to name
-# a chain, which is why it became opt-in.
-[ "$(cln listconfigs | jq -r '.configs["drop-peers-without-networks"].set')" = false ] \
-	|| fail "drop-peers-without-networks is not off by default"
-if docker logs --since 60s "$CLN_CONTAINER" 2>&1 | grep -q "names no networks"; then
-	fail "cln dropped lnd-sha at init; that is now opt-in"
+sleep 5
+# What separates a node on the earlier rules is option_blake2b as an even bit
+# in init: BOLT 1 obliges a peer that does not know one to close the
+# connection, so the stock node hangs up by itself and this side decides
+# nothing. That is the whole mechanism now.
+#
+# This step used to assert two things that are no longer true. It checked a
+# `drop-peers-without-networks` option, which only ever existed in the first
+# version of the chain-identity series and was withdrawn with it. And it
+# expected the connection to die on chain_hash, which cannot happen any more:
+# chain_hash is the genesis hash both chains share, so a stock lnd sends the
+# same value this node does.
+if ! docker compose logs --since 60s lnd-sha 2>&1 | grep -q "unknown required features"; then
+	docker compose logs --since 60s lnd-sha 2>&1 | tail -5
+	fail "lnd-sha did not hang up on an unknown required feature"
 fi
-# The connection still does not survive, and this is the point: it dies one
-# layer further in, on chain_hash, which is what actually separates the two
-# chains. lnd-sha sends a gossip_timestamp_filter carrying Bitcoin's
-# chain_hash and Core Lightning refuses it. open_channel carries chain_hash
-# too, so there is nothing a node of the other chain can do here whether or
-# not it was dropped at init.
-docker compose logs --since 60s lnd-sha 2>&1 | grep -q "bad chain" \
-	|| fail "lnd-sha was not refused on chain_hash either, which is the isolation"
-pass "lnd-sha kept at init and refused on chain_hash, where it counts"
+[ "$(cln listpeers "$sha_pub" | jq -r '.peers | length')" = 0 ] \
+	|| fail "lnd-sha is still a peer of cln, so the even bit did not separate them"
+pass "stock lnd hangs up on bit 68 and is not a peer"
 
 step "cln-interop: funding the Core Lightning wallet"
 if [ "$(cln listfunds | jq '[.outputs[] | select(.status == "confirmed")] | length')" = 0 ]; then
