@@ -11,6 +11,7 @@
 #   make sha CMD="getblockcount"      bitcoin-cli on the SHA256d node
 #   make lf1 CMD="getinfo"            lncli on lf1 (also lf2, lndsha)
 #   make cln / make cln-interop       Core Lightning (BLAKE2b identity) and the interop scenario
+#   make flagday                      the 512/514 flag-day matrix (images overridable)
 #   make all-scenarios                every scenario including cln-interop (after make cln)
 #   make cln-release / cln-migration  the released privkeyio binaries, and the upgrade-path scenario
 #   make cln-cli CMD="getinfo"        lightning-cli on it
@@ -27,7 +28,7 @@ export ACTIVATION_HEIGHT ?= 20
 .PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup offer-latency cln4-split cln-pytest \
 	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart bolt12 \
 	identity chain-separation prefix-offers named-channel-type gossip-height \
-	unified-sigs restamp htlc-sighash chain-hash-migration cln-vanilla
+	unified-sigs restamp htlc-sighash chain-hash-migration cln-vanilla flagday
 
 build:
 	mkdir -p bin
@@ -195,6 +196,13 @@ cln:
 	id=$$(docker create knots-blake2b:final-zmq) && docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli && docker rm $$id >/dev/null
 	$(COMPOSE) --profile cln build cln
 	$(COMPOSE) --profile cln up -d cln
+
+# The 28 September flag day: lnd and Core Lightning on 512/514 against both on
+# 68/70, peering both ways, a unified_sigs channel, BOLT 11 payments both ways.
+# Images are overridable so it can be pointed at the release builds on the day:
+#   make flagday CLN_NEW_IMAGE=... LND_NEW_IMAGE=...
+flagday:
+	bash scripts/scenario-flagday.sh
 
 cln-interop:
 	CLN_CONTAINER=lightning-fork-lab-cln-1 CLN_HOST=cln bash scripts/scenario-cln-interop.sh
