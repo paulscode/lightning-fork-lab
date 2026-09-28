@@ -190,6 +190,14 @@ b64=$(cli $A exportchanbackup --chan_point "$cp" | jq -r '.chan_backup // empty'
 [ -n "$b64" ] || fail "could not export a backup for the migrated channel"
 pass "the channel is present and exportable after the upgrade"
 
+# A channel from .9 predates option_unified_sigs, and must say so: it is the
+# kind a downgrade leaves signable. Builds before .13 have no field.
+unified=$(cli $A listchannels | jq -r --arg c "$cp" \
+	'.channels[] | select(.channel_point == $c) | .unified_sigs | if . == null then "absent" else tostring end')
+echo "  unified_sigs   : $unified"
+[ "$unified" = false ] || [ "$unified" = absent ] \
+	|| fail "a channel opened by .9 is reported as unified_sigs=$unified"
+
 step "migration: while only one end has upgraded, the two cannot peer"
 # Not a fault, and not caused by the migration. The upgraded node advertises
 # the genesis hash and bit 512; the one still on .9 advertises the old chain

@@ -151,6 +151,11 @@ echo "$after" | grep -qE "(^|[,= ])514(,|$)" || fail "the stored channel type wa
 echo "$after" | grep -qE "(^|[,= ])70(,|$)" && fail "bit 70 is still in the stored channel type: $after"
 [ "$(L listchannels | jq -r '.channels[0].channel_point')" = "$CHAN_POINT" ] \
 	|| fail "lnd's channel is not the one opened before the upgrade"
+# Builds from 0.21.3-beta-blake2b.13 report it; earlier ones have no field.
+unified=$(L listchannels | jq -r '.channels[0].unified_sigs | if . == null then "absent" else tostring end')
+echo "  - lnd reports unified_sigs: $unified"
+[ "$unified" = true ] || [ "$unified" = absent ] \
+	|| fail "lnd reports the unified channel as unified_sigs=$unified"
 pass "the same channel resumed, stored type moved 70 -> 514, unified_sigs kept"
 
 # ----------------------------------------------------------------- step 2 --
