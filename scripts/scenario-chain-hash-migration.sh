@@ -18,6 +18,9 @@
 #   3. upgrade the other. They must peer again and the channel must carry a
 #      payment, so it survived as a channel and not merely as a database row
 #
+# DB_ARGS picks the database: empty for bbolt, as the Umbrel app runs, or
+# "--db.backend=sqlite --db.use-native-sql" for what the StartOS package runs.
+#
 # Step 2 also pins something an operator has to know: while one end is upgraded
 # and the other is not, the two cannot peer at all, so the channel is unusable
 # until both move. That is inherent to changing chain_hash rather than anything
@@ -66,7 +69,7 @@ start_node() {
 		--bitcoind.zmqpubrawtx=tcp://knots-b2b:28333 \
 		--rpclisten=0.0.0.0:10009 --listen=0.0.0.0:9735 \
 		--externalip="$name":9735 --tlsextradomain="$name" \
-		--alias="$name" --debuglevel=info >/dev/null
+		${DB_ARGS:-} --alias="$name" --debuglevel=info >/dev/null
 }
 
 cli() {
@@ -189,8 +192,8 @@ pass "the channel is present and exportable after the upgrade"
 
 step "migration: while only one end has upgraded, the two cannot peer"
 # Not a fault, and not caused by the migration. The upgraded node advertises
-# the genesis hash and bit 68; the one still on .9 advertises the old chain
-# hash and does not know bit 68. Each refuses the other. Anyone upgrading a
+# the genesis hash and bit 512; the one still on .9 advertises the old chain
+# hash and does not know bit 512. Each refuses the other. Anyone upgrading a
 # node with channels needs to know the channel is dark until the peer follows.
 cli $A connect "$b_pub@$B:9735" >/dev/null 2>&1 || true
 sleep 8
@@ -248,6 +251,27 @@ record migration paid_after "$paid"
 [ "$paid" = yes ] || fail "the channel is in the database but will not carry a
 payment, so the migration moved a row rather than a working channel"
 pass "the channel opened under the old chain hash carries a payment under the new one"
+
+step "migration: close it cooperatively on the new build"
+# What an operator would do to replace a channel from before the upgrade with
+# one announced under the new rules: both ends upgraded, then a mutual close.
+before_close=$(cli $A walletbalance | jq -r .confirmed_balance)
+cli $A closechannel --funding_txid "${cp%:*}" --output_index "${cp#*:}" \
+	>/dev/null 2>&1 &
+closed=no
+for i in $(seq 1 24); do
+	sleep 5
+	mine_b2b 1 >/dev/null 2>&1 || true
+	n=$(cli $A closedchannels | jq -r --arg c "$cp" \
+		'[.channels[] | select(.channel_point == $c and .close_type == "COOPERATIVE_CLOSE")] | length')
+	[ "${n:-0}" -ge 1 ] && closed=yes && break
+done
+after_close=$(cli $A walletbalance | jq -r .confirmed_balance)
+echo "  cooperative close: $closed, wallet $before_close -> $after_close"
+record migration coop_close "$closed"
+[ "$closed" = yes ] && [ "$after_close" -gt "$before_close" ] || fail "the
+migrated channel did not close cooperatively with its balance returned"
+pass "the channel from before the upgrade closes cooperatively once both ends have upgraded"
 
 step "migration: verdict"
 cat <<EOF

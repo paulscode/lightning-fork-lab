@@ -12,6 +12,8 @@
 #   make lf1 CMD="getinfo"            lncli on lf1 (also lf2, lndsha)
 #   make cln / make cln-interop       Core Lightning (BLAKE2b identity) and the interop scenario
 #   make flagday                      the 512/514 flag-day matrix (images overridable)
+#   make flagday-upgrade              a 68/70 unified channel carried across the flag day
+#   make legacy-force-close / legacy-gossip  what a node upgrading from .9 carries across
 #   make all-scenarios                every scenario including cln-interop (after make cln)
 #   make cln-release / cln-migration  the released privkeyio binaries, and the upgrade-path scenario
 #   make cln-cli CMD="getinfo"        lightning-cli on it
@@ -28,7 +30,7 @@ export ACTIVATION_HEIGHT ?= 20
 .PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup offer-latency cln4-split cln-pytest \
 	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart bolt12 \
 	identity chain-separation prefix-offers named-channel-type gossip-height \
-	unified-sigs restamp htlc-sighash chain-hash-migration cln-vanilla flagday
+	unified-sigs restamp htlc-sighash chain-hash-migration legacy-force-close legacy-gossip cln-vanilla flagday flagday-upgrade
 
 build:
 	mkdir -p bin
@@ -183,6 +185,17 @@ htlc-sighash:
 chain-hash-migration:
 	bash scripts/scenario-chain-hash-migration.sh
 
+# Two more things a node upgrading from .9 carries across: a force close still
+# waiting out its delay must be swept, and a public channel announced under the
+# old chain hash must still gossip, reach a fresh node and carry a payment
+# routed through it. Both take DB_ARGS for the SQLite backend the StartOS
+# package runs, e.g. DB_ARGS="--db.backend=sqlite --db.use-native-sql".
+legacy-force-close:
+	bash scripts/scenario-legacy-force-close.sh
+
+legacy-gossip:
+	bash scripts/scenario-legacy-gossip.sh
+
 # privkeyio's blake2b-unified at 24d027310 with nothing applied on top. The
 # image records the commit at /cln-commit and the build refuses a dirty tree.
 cln-vanilla:
@@ -203,6 +216,11 @@ cln:
 #   make flagday CLN_NEW_IMAGE=... LND_NEW_IMAGE=...
 flagday:
 	bash scripts/scenario-flagday.sh
+
+# The flag day as an upgrade: a unified channel opened on 68/70 resumes on
+# 512/514 after both ends restart on the new builds, pays, and closes 0x21/0x21.
+flagday-upgrade:
+	bash scripts/scenario-flagday-upgrade.sh
 
 cln-interop:
 	CLN_CONTAINER=lightning-fork-lab-cln-1 CLN_HOST=cln bash scripts/scenario-cln-interop.sh
