@@ -207,15 +207,13 @@ wait_for "lnd new at the tip ($tip)" 120 sh -c "[ \"\$(docker exec $P-lnd-new ln
 inv=$(C new invoice 300000000 "fd-$(date +%s)-a" "flag day" | jq -r .bolt11)
 L new decodepayreq --pay_req "$inv" | jq -e '.features["512"]' >/dev/null \
 	|| fail "cln's invoice does not carry bit 512"
-# lnd has been seen to refuse this first payment with INSUFFICIENT_BALANCE on a
-# channel that plainly had the balance: active, 999,056 sat local, peer
-# connected, every node at the tip. It happened in two runs of seven, only
-# while the script mined 101 blocks in a burst just before paying, with Core
-# Lightning logging "Ignoring fee limits!" at that moment; since funding moved
-# to a wallet payment it has not happened in six. So it looks like lnd still
-# digesting the burst rather than anything about the flag day. That reason,
-# and only that reason, is retried, and the first failure is always reported
-# with diagnostics, so if it comes back it is visible rather than absorbed.
+# lnd has been seen to refuse the first payment on a freshly opened channel
+# with INSUFFICIENT_BALANCE when the channel plainly had the balance: active,
+# 999,056 sat local, peer connected, every node at the tip. It is not about the
+# flag day: scenario-flagday-upgrade.sh caught it between the old builds (.11
+# and Core Lightning .4) before either was upgraded. It clears within seconds.
+# That reason, and only that reason, is retried, and the first failure is
+# always reported with diagnostics, so it stays visible rather than absorbed.
 attempt=1
 while :; do
 	payout=$(L new payinvoice --force --pay_req "$inv" --timeout 60s 2>&1 || true)
