@@ -194,9 +194,14 @@ pass "the channel is present and exportable after the upgrade"
 # kind a downgrade leaves signable. Builds before .13 have no field.
 unified=$(cli $A listchannels | jq -r --arg c "$cp" \
 	'.channels[] | select(.channel_point == $c) | .unified_sigs | if . == null then "absent" else tostring end')
+reports=$(cli $A getinfo | jq -r .version | sed -n 's/.*-blake2b\.\([0-9][0-9]*\).*/\1/p')
 echo "  unified_sigs   : $unified"
-[ "$unified" = false ] || [ "$unified" = absent ] \
-	|| fail "a channel opened by .9 is reported as unified_sigs=$unified"
+if [ "${reports:-0}" -ge 13 ]; then
+	[ "$unified" = false ] || fail "a channel opened by .9 is reported as unified_sigs=$unified"
+else
+	[ "$unified" = false ] || [ "$unified" = absent ] \
+		|| fail "a channel opened by .9 is reported as unified_sigs=$unified"
+fi
 
 step "migration: while only one end has upgraded, the two cannot peer"
 # Not a fault, and not caused by the migration. The upgraded node advertises
