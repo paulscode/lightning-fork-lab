@@ -14,6 +14,7 @@
 #   make flagday                      the 512/514 flag-day matrix (images overridable)
 #   make flagday-upgrade              a 68/70 unified channel carried across the flag day
 #   make legacy-force-close / legacy-gossip  what a node upgrading from .9 carries across
+#   make watchtower                   towers and clients refuse peers without the BLAKE2b bit
 #   make all-scenarios                every scenario including cln-interop (after make cln)
 #   make cln-release / cln-migration  the released privkeyio binaries, and the upgrade-path scenario
 #   make cln-cli CMD="getinfo"        lightning-cli on it
@@ -30,7 +31,7 @@ export ACTIVATION_HEIGHT ?= 20
 .PHONY: build up down nuke logs b2b sha lf1 lf2 lndsha scenarios bridge-setup offer-latency cln4-split cln-pytest \
 	e3-sync e4-isolation e4b-refuse e7-replay channel reorg restart bolt12 \
 	identity chain-separation prefix-offers named-channel-type gossip-height \
-	unified-sigs restamp htlc-sighash chain-hash-migration legacy-force-close legacy-gossip cln-vanilla flagday flagday-upgrade
+	unified-sigs restamp htlc-sighash chain-hash-migration legacy-force-close legacy-gossip cln-vanilla flagday flagday-upgrade watchtower
 
 build:
 	mkdir -p bin
@@ -195,6 +196,13 @@ legacy-force-close:
 
 legacy-gossip:
 	bash scripts/scenario-legacy-gossip.sh
+
+# A watchtower client uses only towers that set the BLAKE2b bit, and a tower
+# serves only such clients: new build with new build, and refusals both ways
+# with stock lnd and the previous release. Needs the SHA256d regtest up for the
+# stock nodes. NEW_IMAGE / OLD_IMAGE / STOCK_IMAGE are overridable.
+watchtower:
+	bash scripts/scenario-watchtower.sh
 
 # privkeyio's blake2b-unified at 24d027310 with nothing applied on top. The
 # image records the commit at /cln-commit and the build refuses a dirty tree.
