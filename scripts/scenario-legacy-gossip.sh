@@ -16,20 +16,23 @@
 #      D on the new build, peered with A
 #   3. ask: does D learn the channel? does a fee change on A reach C? can D pay
 #      B through A? and is an offer A minted on .9 no longer listed as live?
-#   4. from .14: the announcement is signed again by A and B, since no other
+#   4. is an offer A minted on .9 no longer listed as live?
+#   5. from .14: the announcement is signed again by A and B, since no other
 #      implementation can check the old one; does a Core Lightning node E,
-#      peered with A, learn the channel, and does nobody answer the gossip
-#      with a bad-signature warning?
+#      peered with A, learn the channel, and does no lnd node receive a
+#      bad-signature warning? (Warnings from a peer with no channel are
+#      logged only at PEER debug, which the nodes run with.)
 #
-# CLN_IMAGE is the Core Lightning release to use for E (on the new bits);
-# set CLN_IMAGE= to skip E, e.g. against a build before .14.
+# CLN_IMAGE is the Core Lightning release to use for E (on the new bits).
+# Setting CLN_IMAGE= skips E, and with it the check that Core Lightning can
+# read the channel; a build before .14 fails on the re-sign check anyway.
 #
 # DB_ARGS picks the database: empty for bbolt, as the Umbrel app runs, or
 # "--db.backend=sqlite --db.use-native-sql" for what the StartOS package runs,
 # where the graph is in SQL tables and stores no chain hash at all.
 #
-# The three questions are reported rather than asserted one by one, so a run
-# shows the whole picture. The verdict fails unless all three hold.
+# The questions are reported rather than asserted one by one, so a run shows
+# the whole picture. The verdict fails unless all of them hold.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -75,7 +78,7 @@ start_node() {
 		--rpclisten=0.0.0.0:10009 --listen=0.0.0.0:9735 \
 		--externalip="$name":9735 --tlsextradomain="$name" \
 		--trickledelay=500 ${DB_ARGS:-} \
-		--alias="$name" --debuglevel=info,DISC=debug >/dev/null
+		--alias="$name" --debuglevel=info,DISC=debug,PEER=debug >/dev/null
 }
 
 cli() {
