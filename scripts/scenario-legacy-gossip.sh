@@ -15,7 +15,7 @@
 #   2. upgrade all three on their own data directories, and start a fresh node
 #      D on the new build, peered with A
 #   3. ask: does D learn the channel? does a fee change on A reach C? can D pay
-#      B through A? and is an offer A minted on .9 no longer listed as live?
+#      B through A?
 #   4. is an offer A minted on .9 no longer listed as live?
 #   5. from .14: the announcement is signed again by A and B, since no other
 #      implementation can check the old one; does a Core Lightning node E,
