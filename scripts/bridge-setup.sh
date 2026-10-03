@@ -43,6 +43,22 @@ else
     pass "lf2 already has an active channel"
 fi
 
+# The reverse direction pays out on the BLAKE2b chain, from lf1 to lf2, so lf1
+# needs outbound capacity of its own there. A channel lf2 opened gives lf1
+# only what lf2 has paid it.
+step "bridge: BLAKE2b side, lf1 -> lf2, for the reverse direction"
+lf2_pub=$(pubkey_of lf2)
+outbound=$(lf1 listchannels | jq --arg p "$lf2_pub" '[.channels[]
+    | select(.active and .remote_pubkey == $p)
+    | (.local_balance|tonumber)] | max // 0')
+if [ "${outbound:-0}" -lt 100000 ]; then
+    fund_lf lf1 2
+    open_channel lf1 lf2 1000000 b2b
+    pass "lf1 -> lf2 open, the bridge can pay out on the BLAKE2b chain"
+else
+    pass "lf1 already has $outbound sat towards lf2"
+fi
+
 step "bridge: Bitcoin side, lnd-sha -> lnd-sha2"
 if [ "$(lndsha listchannels | jq '[.channels[] | select(.active)] | length')" = 0 ]; then
     fund_sha lnd-sha 2
@@ -63,8 +79,12 @@ step "bridge: give lnd-sha2 something to spend, for the reverse direction"
 spendable=$(lndsha2 listchannels \
     | jq '[.channels[] | select(.active) | (.local_balance|tonumber) - (.local_chan_reserve_sat|tonumber)] | max // 0')
 if [ "${spendable:-0}" -lt 20000 ]; then
-    inv=$(lndsha2 addinvoice --amt 60000 | jq -r .payment_request)
-    lndsha payinvoice --force "$inv" >/dev/null 2>&1 || true
+    inv=$(lndsha2 addinvoice --amt 100000 | jq -r .payment_request)
+    # Reported rather than swallowed: when this silently failed, the reverse
+    # direction failed later with INSUFFICIENT_BALANCE, which reads like a
+    # bridge fault.
+    lndsha payinvoice --force --timeout=60s "$inv" >/dev/null 2>&1 \
+        || fail "could not give lnd-sha2 a balance to spend"
     sleep 3
     pass "lnd-sha2 can now send, so it can act as the user paying into the bridge"
 else

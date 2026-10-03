@@ -31,11 +31,11 @@ services:
       - --protocol.simple-taproot-chans
       - --accept-keysend
       - --bridgerpc.enabled
-      - --bridgerpc.tobitcoin
+      - --bridgerpc.tosha256
       - --bridgerpc.toblake2b
-      - --bridgerpc.bitcoin.rpchost=lnd-sha:10009
-      - --bridgerpc.bitcoin.tlscertpath=/mnt/lnd-sha/tls.cert
-      - --bridgerpc.bitcoin.macaroonpath=/mnt/lnd-sha/data/chain/bitcoin/regtest/admin.macaroon
+      - --bridgerpc.sha256.rpchost=lnd-sha:10009
+      - --bridgerpc.sha256.tlscertpath=/mnt/lnd-sha/tls.cert
+      - --bridgerpc.sha256.macaroonpath=/mnt/lnd-sha/data/chain/bitcoin/regtest/admin.macaroon
       # A rate that makes the arithmetic easy to check by eye: 1 BTC per
       # BTCB2, so incoming and outgoing millisatoshis differ only by the
       # spread. A real one is nowhere near this.
