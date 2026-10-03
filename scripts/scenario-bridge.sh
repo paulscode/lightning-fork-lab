@@ -121,6 +121,15 @@ b64_to_hex() {
 
 echo "== the bridge is ready to quote =="
 wait_ready 180
+# The amounts below assume the lab's rate of 1 BTC per BTCB2. A rate set at
+# runtime survives a restart, and the reverse direction's swap bounds are
+# converted at the rate in force when the bridge started, so put the rate back
+# and restart before going on.
+if ! bridge status | jq -e '.rate == 1' >/dev/null; then
+    lncli_on lf1 bridge setrate 1.0 >/dev/null
+    $COMPOSE restart lf1 >/dev/null 2>&1
+    wait_ready 180
+fi
 info=$(bridge info)
 echo "$info" | jq -e '[.directions[] | select(.open)] | length == 2' \
     >/dev/null || fail "not both directions open: $info"
