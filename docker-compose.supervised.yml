@@ -1,0 +1,87 @@
+# A bridge whose SHA256 node Lightning Fork runs for the operator
+# (bridgerpc.sha256.supervised), for scenario-supervised.sh.
+#
+# Shaped like the packages, deliberately:
+#
+# - lf3-sha256 is the stock lnd image, unmodified, sharing lf3's network
+#   namespace (as two daemons in one StartOS package do), so the bridge reaches
+#   it at its default 127.0.0.1:10019 with nothing configured.
+# - It shares lf3's volume, mounted at /lf, and keeps its own lnd directory at
+#   sha256-node/ inside it, which is where lf3 looks by default.
+# - It starts only once lf3 has written the wallet password file: the platform
+#   packages wait for it the same way, which is what keeps the process from
+#   doing anything until the bridge is on.
+# - Nothing about its wallet, seed or macaroons is set here. lf3 creates the
+#   wallet from a seed derived from its own, and bakes the macaroon it uses.
+#
+# Layered over docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.supervised.yml up -d lf3 lf3-sha256
+services:
+  lf3:
+    image: lightning-fork:dev
+    restart: "no"
+    depends_on:
+      knots-b2b:
+        condition: service_healthy
+    networks: [lab]
+    command:
+      - --noseedbackup
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoin.blake2b-activation-height=${ACTIVATION_HEIGHT:-20}
+      - --fee.url=http://fees:8080/fees.json
+      - --bitcoind.rpchost=knots-b2b:18443
+      - --bitcoind.rpcuser=lab
+      - --bitcoind.rpcpass=lab
+      - --bitcoind.zmqpubrawblock=tcp://knots-b2b:28332
+      - --bitcoind.zmqpubrawtx=tcp://knots-b2b:28333
+      - --rpclisten=0.0.0.0:10009
+      - --restlisten=0.0.0.0:8080
+      - --listen=0.0.0.0:9735
+      - --externalip=lf3:9735
+      - --tlsextradomain=lf3
+      - --alias=lf3
+      - --debuglevel=info,BRPC=debug
+      - --protocol.simple-taproot-chans
+      - --bridgerpc.enabled
+      - --bridgerpc.tosha256
+      - --bridgerpc.sha256.supervised
+      - --bridgerpc.spread=0.01
+      # No rate: the bridge starts and refuses to quote until one is set,
+      # which is the first-run state the scenario checks.
+    volumes:
+      - lf3-data:/root/.lnd
+
+  lf3-sha256:
+    image: lightninglabs/lnd:v0.21.4-beta
+    restart: unless-stopped
+    network_mode: "service:lf3"
+    depends_on:
+      - lf3
+      - bitcoind-sha
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        pw=/lf/data/chain/bitcoin/regtest/bridge/sha256/wallet.password
+        until [ -s "$$pw" ]; do sleep 2; done
+        exec lnd \
+          --lnddir=/lf/sha256-node \
+          --bitcoin.regtest \
+          --bitcoin.node=bitcoind \
+          --bitcoind.rpchost=bitcoind-sha:18443 \
+          --bitcoind.rpcuser=lab \
+          --bitcoind.rpcpass=lab \
+          --bitcoind.zmqpubrawblock=tcp://bitcoind-sha:28332 \
+          --bitcoind.zmqpubrawtx=tcp://bitcoind-sha:28333 \
+          --rpclisten=127.0.0.1:10019 \
+          --restlisten=127.0.0.1:8089 \
+          --listen=0.0.0.0:9739 \
+          --externalip=lf3:9739 \
+          --alias=lf3-sha256 \
+          --wallet-unlock-password-file="$$pw" \
+          --wallet-unlock-allow-create
+    volumes:
+      - lf3-data:/lf
+
+volumes:
+  lf3-data:
