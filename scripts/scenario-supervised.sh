@@ -75,7 +75,18 @@ fi
 pass "the bridge's macaroon is refused anything beyond what the bridge calls"
 
 step "2. Fund it, open a channel from it, set a rate, and swap"
+# A channel left by an earlier run is only reconnecting after the containers
+# are recreated. Reconnect it by name (a recreated container can have a new
+# address, which the stored one no longer reaches) and wait for it rather than
+# opening another: opening one mines a burst of blocks, and see below for what
+# a burst does to the margin.
+if [ "$(sha256 listchannels | jq '.channels | length')" -gt 0 ]; then
+    sha256 connect "$(lndsha2 getinfo | jq -r .identity_pubkey)@lnd-sha2:9735" >/dev/null 2>&1 || true
+    wait_for "the SHA256 node's channel to reconnect" 180 \
+        sh -c "[ \"\$($C exec -T lf3 lncli --network=regtest bridge status | jq -r .sha256_node.active_channels)\" -ge 1 ]"
+fi
 if [ "$(node_field active_channels)" = 0 ]; then
+    burst=1
     addr=$(sha256 newaddress p2tr | jq -r .address)
     sha -rpcwallet=lab sendtoaddress "$addr" 0.05 >/dev/null
     mine_sha 6
@@ -98,7 +109,12 @@ pass "rate set"
 
 # The payer: lf2 on the BLAKE2b chain, with a channel to the bridge.
 lf3_key=$(lf3 getinfo | jq -r .identity_pubkey)
+if lf2 listchannels | jq -e --arg k "$lf3_key" '.channels[] | select(.remote_pubkey==$k)' >/dev/null; then
+    lf2 connect "$lf3_key@lf3:9735" >/dev/null 2>&1 || true
+    wait_for "lf2's channel to lf3 to reconnect" 180 sh -c "$COMPOSE exec -T lf2 lncli --network=regtest listchannels | jq -e --arg k '$lf3_key' '.channels[] | select(.remote_pubkey==\$k and .active)'"
+fi
 if ! lf2 listchannels | jq -e --arg k "$lf3_key" '.channels[] | select(.remote_pubkey==$k and .active)' >/dev/null; then
+    burst=1
     ensure_b2b_funds 1
     lf2_addr=$(lf2 newaddress p2tr | jq -r .address)
     b2b -rpcwallet=lab sendtoaddress "$lf2_addr" 0.1 >/dev/null
@@ -113,8 +129,12 @@ if ! lf2 listchannels | jq -e --arg k "$lf3_key" '.channels[] | select(.remote_p
 fi
 pass "the payer has a channel to the bridge"
 
-# The chain observers need block spacing that looks like a chain.
-if ! status | jq -e '.refusals | map(select(test("measuring block spacing"))) | length == 0' >/dev/null; then
+# The chain observers need block spacing that looks like a chain. A burst
+# mined above to open a channel reads as blocks seconds apart: once the bridge
+# samples it, the BLAKE2b chain looks faster, and a swap whose margin passed
+# before can be refused when its payment is retried (step 3). Pacing past the
+# observer's window and restarting lf3 measures paced blocks only.
+if [ -n "${burst:-}" ] || ! status | jq -e '.refusals | map(select(test("measuring block spacing"))) | length == 0' >/dev/null; then
     COUNT=${COUNT:-160} bash scripts/pace-blocks.sh >/dev/null
     $C restart lf3 >/dev/null
     wait_for "lf3 to answer" 120 lf3 getinfo
