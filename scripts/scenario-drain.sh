@@ -28,7 +28,7 @@ $C stop lf3-sha256 >/dev/null 2>&1
 ( lf2 payinvoice --force --timeout 10m "$hold" > results/drain-held.json 2>&1 || true ) &
 payer=$!
 # Whatever happens, the lab is left as scenario-supervised.sh expects it.
-trap '$C up -d lf3 >/dev/null 2>&1; $C start lf3-sha256 >/dev/null 2>&1; kill $payer 2>/dev/null' EXIT
+trap '$C up -d lf3 >/dev/null 2>&1; $C start lf3-sha256 >/dev/null 2>&1; kill $payer 2>/dev/null || true' EXIT
 wait_for "the bridge to hold the payer's HTLC" 120 \
     sh -c "[ \"\$($C exec -T lf3 lncli --network=regtest bridge status | jq -r .swaps_in_flight)\" -ge 1 ]"
 pass "a swap is under way and cannot finish yet"
@@ -68,3 +68,4 @@ pass "lf3 is back as it was"
 
 echo
 echo "DRAIN SCENARIO PASSED"
+exit 0
