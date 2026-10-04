@@ -12,7 +12,7 @@
 #   3b. Its chain node's file (the Umbrel dashboard's bridge-sha256.conf)
 #      changes: the node restarts on it and the bridge reconnects; removed,
 #      the node stops and waits, and the bridge says it is not answering.
-#   4. The gate for Phase B2 (doc 07): the SHA256 node's exported phrase and
+#   4. The restore gate: the SHA256 node's exported phrase and
 #      its channel backup restore it in a separate stock lnd, with the
 #      identity the export promised, and its channel funds come back.
 #
