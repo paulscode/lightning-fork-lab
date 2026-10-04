@@ -1,0 +1,29 @@
+# lf3 with its bridge turned off but its SHA256 node still configured, as the
+# platforms leave it: for scenario-drain.sh. Layered over the supervised
+# overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.supervised.yml \
+#     -f docker-compose.supervised-off.yml up -d lf3
+services:
+  lf3:
+    command:
+      - --noseedbackup
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoin.blake2b-activation-height=${ACTIVATION_HEIGHT:-20}
+      - --fee.url=http://fees:8080/fees.json
+      - --bitcoind.rpchost=knots-b2b:18443
+      - --bitcoind.rpcuser=lab
+      - --bitcoind.rpcpass=lab
+      - --bitcoind.zmqpubrawblock=tcp://knots-b2b:28332
+      - --bitcoind.zmqpubrawtx=tcp://knots-b2b:28333
+      - --rpclisten=0.0.0.0:10009
+      - --restlisten=0.0.0.0:8080
+      - --listen=0.0.0.0:9735
+      - --externalip=lf3:9735
+      - --tlsextradomain=lf3
+      - --alias=lf3
+      - --debuglevel=info,BRPC=debug
+      - --protocol.simple-taproot-chans
+      - --bridgerpc.sha256.supervised
+      - --bridgerpc.sha256.rpchost=lf3-sha256:10019
+      - --bridgerpc.spread=0.01
