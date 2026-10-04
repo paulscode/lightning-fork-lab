@@ -9,6 +9,9 @@
 #      a rate; a payer on the BLAKE2b chain pays a SHA256 invoice through it.
 #   3. The SHA256 node is killed while a payer's HTLC is held. When it comes
 #      back the swap completes: nothing is lost and nothing paid twice.
+#   3b. Its chain node's file (the Umbrel dashboard's bridge-sha256.conf)
+#      changes: the node restarts on it and the bridge reconnects; removed,
+#      the node stops and waits, and the bridge says it is not answering.
 #   4. The gate for Phase B2 (doc 07): the SHA256 node's exported phrase and
 #      its channel backup restore it in a separate stock lnd, with the
 #      identity the export promised, and its channel funds come back.
@@ -25,11 +28,24 @@ lf3()    { $C exec -T lf3 lncli --network=regtest --rpcserver=127.0.0.1:10009 "$
 sha256() { $C exec -T lf3-sha256 lncli --network=regtest \
                --lnddir=/lf/sha256-node --rpcserver=127.0.0.1:10019 "$@"; }
 status() { lf3 bridge status; }
+# The chain node the SHA256 node reads, as the Umbrel dashboard writes it.
+write_conf() {
+    $C exec -T lf3 sh -c 'umask 077; cat > /root/.lnd/bridge-sha256.conf.tmp && mv /root/.lnd/bridge-sha256.conf.tmp /root/.lnd/bridge-sha256.conf' <<EOF
+# Written as the Lightning Fork dashboard writes it${1:+ ($1)}.
+[Bitcoind]
+bitcoind.rpchost=bitcoind-sha:18443
+bitcoind.rpcuser=lab
+bitcoind.rpcpass=lab
+EOF
+}
+restarts() { docker inspect -f '{{.RestartCount}}' "$($C ps -q lf3-sha256)"; }
 node_field() { status | jq -r ".sha256_node.$1"; }
 
 step "1. On, with nothing else configured"
-$C up -d lf3 lf3-sha256 >/dev/null 2>&1
+$C up -d lf3 >/dev/null 2>&1
 wait_for "lf3 to answer" 120 lf3 getinfo
+write_conf
+$C up -d lf3-sha256 >/dev/null 2>&1
 wait_for "the supervised SHA256 node to be ready" 300 \
     sh -c "[ \"\$($C exec -T lf3 lncli --network=regtest bridge status | jq -r .sha256_node.state)\" = ready ]"
 [ "$(node_field mode)" = supervised ] || fail "mode is $(node_field mode)"
@@ -142,6 +158,25 @@ paid=$(lf2 listpayments --include_incomplete --max_payments 1000 \
 [ "$paid" = SUCCEEDED ] || fail "the payer's payment is $paid"
 [ "$(node_field state)" = ready ] || fail "state after restart: $(node_field state)"
 pass "after the restart the swap completed and the payer's payment settled"
+
+step "3b. Its chain node's file changes, then goes"
+before=$(restarts)
+write_conf "chosen again"
+wait_for "the SHA256 node to restart on its new file" 60 \
+    sh -c "[ \"\$(docker inspect -f '{{.RestartCount}}' \$($C ps -q lf3-sha256))\" -gt $before ]"
+wait_for "the bridge to reach it again" 300 \
+    sh -c "[ \"\$($C exec -T lf3 lncli --network=regtest bridge status | jq -r .sha256_node.state)\" = ready ]"
+pass "a changed file restarted the SHA256 node, and the bridge reconnected"
+$C exec -T lf3 rm -f /root/.lnd/bridge-sha256.conf
+wait_for "the SHA256 node to stop" 60 \
+    sh -c "! $C exec -T lf3-sha256 sh -c 'pidof lnd' >/dev/null 2>&1"
+wait_for "the bridge to say so" 120 \
+    sh -c "[ \"\$($C exec -T lf3 lncli --network=regtest bridge status | jq -r .sha256_node.state)\" != ready ]"
+pass "with no file the SHA256 node stops and waits, and the bridge says it is not ready"
+write_conf
+wait_for "the bridge to reach it once the file is back" 300 \
+    sh -c "[ \"\$($C exec -T lf3 lncli --network=regtest bridge status | jq -r .sha256_node.state)\" = ready ]"
+pass "the file back, the node and the bridge come back"
 
 if [ "${RESTORE:-0}" != 1 ]; then
     echo

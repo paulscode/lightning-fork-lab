@@ -16,6 +16,13 @@
 #   doing anything until the bridge is on.
 # - Nothing about its wallet, seed or macaroons is set here. lf3 creates the
 #   wallet from a seed derived from its own, and bakes the macaroon it uses.
+# - The chain node it reads is not on its command line either: as on Umbrel,
+#   it is in bridge-sha256.conf in lf3's directory (the dashboard writes it
+#   there; scenario-supervised.sh here), the node waits for that file too,
+#   reads its chain node by RPC polling, and stops when the file changes or
+#   goes, so its restart policy starts it again on what is there. The shell
+#   is the Umbrel package's, but for the lab's paths, network and a shorter
+#   polling interval. Unlike Umbrel it runs as root, as lf3 does.
 #
 # Layered over docker-compose.yml:
 #   docker compose -f docker-compose.yml -f docker-compose.supervised.yml up -d lf3 lf3-sha256
@@ -67,16 +74,20 @@ services:
     command:
       - |
         pw=/lf/data/chain/bitcoin/regtest/bridge/sha256/wallet.password
-        until [ -s "$$pw" ]; do sleep 2; done
-        exec lnd \
+        conf=/lf/bridge-sha256.conf
+        trap 'exit 0' TERM INT
+        until [ -s "$$pw" ] && [ -s "$$conf" ]; do sleep 2 & wait $$!; done
+        sum=$$(cksum < "$$conf")
+        lnd=""
+        trap '[ -n "$$lnd" ] && kill -TERM $$lnd && wait $$lnd; exit 0' TERM INT
+        lnd \
           --lnddir=/lf/sha256-node \
+          --configfile="$$conf" \
           --bitcoin.regtest \
           --bitcoin.node=bitcoind \
-          --bitcoind.rpchost=bitcoind-sha:18443 \
-          --bitcoind.rpcuser=lab \
-          --bitcoind.rpcpass=lab \
-          --bitcoind.zmqpubrawblock=tcp://bitcoind-sha:28332 \
-          --bitcoind.zmqpubrawtx=tcp://bitcoind-sha:28333 \
+          --bitcoind.rpcpolling \
+          --bitcoind.blockpollinginterval=2s \
+          --bitcoind.txpollinginterval=2s \
           --rpclisten=0.0.0.0:10019 \
           --restlisten=0.0.0.0:8089 \
           --listen=0.0.0.0:9739 \
@@ -84,7 +95,15 @@ services:
           --tlsextradomain=lf3-sha256 \
           --alias=lf3-sha256 \
           --wallet-unlock-password-file="$$pw" \
-          --wallet-unlock-allow-create
+          --wallet-unlock-allow-create &
+        lnd=$$!
+        while kill -0 $$lnd 2>/dev/null; do
+          sleep 2 & wait $$!
+          if [ "$$({ cksum < "$$conf"; } 2>/dev/null)" != "$$sum" ]; then
+            kill -TERM $$lnd; wait $$lnd; exit 0
+          fi
+        done
+        wait $$lnd
     volumes:
       - lf3-data:/lf
 
