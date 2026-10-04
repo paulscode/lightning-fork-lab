@@ -3,9 +3,12 @@
 #
 # Shaped like the packages, deliberately:
 #
-# - lf3-sha256 is the stock lnd image, unmodified, sharing lf3's network
-#   namespace (as two daemons in one StartOS package do), so the bridge reaches
-#   it at its default 127.0.0.1:10019 with nothing configured.
+# - lf3-sha256 is the stock lnd image, unmodified, at its own address on the
+#   lab network, as on Umbrel: a container joined to another's network
+#   namespace loses its network when that one restarts, so the packages that
+#   run on Docker cannot share one. lf3 names it with bridgerpc.sha256.rpchost.
+#   (StartOS's daemons do share a namespace, which survives restarts; that is
+#   the default 127.0.0.1:10019, covered by the unit tests.)
 # - It shares lf3's volume, mounted at /lf, and keeps its own lnd directory at
 #   sha256-node/ inside it, which is where lf3 looks by default.
 # - It starts only once lf3 has written the wallet password file: the platform
@@ -46,6 +49,7 @@ services:
       - --bridgerpc.enabled
       - --bridgerpc.tosha256
       - --bridgerpc.sha256.supervised
+      - --bridgerpc.sha256.rpchost=lf3-sha256:10019
       - --bridgerpc.spread=0.01
       # No rate: the bridge starts and refuses to quote until one is set,
       # which is the first-run state the scenario checks.
@@ -55,7 +59,7 @@ services:
   lf3-sha256:
     image: lightninglabs/lnd:v0.21.4-beta
     restart: unless-stopped
-    network_mode: "service:lf3"
+    networks: [lab]
     depends_on:
       - lf3
       - bitcoind-sha
@@ -73,10 +77,11 @@ services:
           --bitcoind.rpcpass=lab \
           --bitcoind.zmqpubrawblock=tcp://bitcoind-sha:28332 \
           --bitcoind.zmqpubrawtx=tcp://bitcoind-sha:28333 \
-          --rpclisten=127.0.0.1:10019 \
-          --restlisten=127.0.0.1:8089 \
+          --rpclisten=0.0.0.0:10019 \
+          --restlisten=0.0.0.0:8089 \
           --listen=0.0.0.0:9739 \
-          --externalip=lf3:9739 \
+          --externalip=lf3-sha256:9739 \
+          --tlsextradomain=lf3-sha256 \
           --alias=lf3-sha256 \
           --wallet-unlock-password-file="$$pw" \
           --wallet-unlock-allow-create
