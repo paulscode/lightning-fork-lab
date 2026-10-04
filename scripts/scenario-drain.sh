@@ -27,6 +27,8 @@ hash=$(lndsha2 decodepayreq "$inv" | jq -r .payment_hash)
 $C stop lf3-sha256 >/dev/null 2>&1
 ( lf2 payinvoice --force --timeout 10m "$hold" > results/drain-held.json 2>&1 || true ) &
 payer=$!
+# Whatever happens, the lab is left as scenario-supervised.sh expects it.
+trap '$C up -d lf3 >/dev/null 2>&1; $C start lf3-sha256 >/dev/null 2>&1; kill $payer 2>/dev/null' EXIT
 wait_for "the bridge to hold the payer's HTLC" 120 \
     sh -c "[ \"\$($C exec -T lf3 lncli --network=regtest bridge status | jq -r .swaps_in_flight)\" -ge 1 ]"
 pass "a swap is under way and cannot finish yet"
@@ -54,7 +56,7 @@ paid=$(lf2 listpayments --include_incomplete --max_payments 1000 \
 [ "$paid" = SUCCEEDED ] || fail "the payer's payment is $paid"
 pass "the swap finished: the SHA256 invoice paid and the payer's payment settled"
 wait_for "the bridge to stop once drained" 120 \
-    sh -c "$C exec -T lf3 lncli --network=regtest bridge status | jq -e '(.refusals | map(select(test(\"finishing\"))) | length == 0)' >/dev/null"
+    sh -c "$C exec -T lf3 lncli --network=regtest bridge status | jq -e '.enabled == false and .unfinished == 0 and .swaps_in_flight == 0 and (.refusals | map(select(test(\"finishing\"))) | length == 0)' >/dev/null"
 pass "drained, the bridge stopped"
 
 step "4. Back on"

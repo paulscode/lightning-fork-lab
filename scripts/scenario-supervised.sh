@@ -168,10 +168,13 @@ wait_for "the bridge to reach it again" 300 \
     sh -c "[ \"\$($C exec -T lf3 lncli --network=regtest bridge status | jq -r .sha256_node.state)\" = ready ]"
 pass "a changed file restarted the SHA256 node, and the bridge reconnected"
 $C exec -T lf3 rm -f /root/.lnd/bridge-sha256.conf
-wait_for "the SHA256 node to stop" 60 \
-    sh -c "! $C exec -T lf3-sha256 sh -c 'pidof lnd' >/dev/null 2>&1"
+# Running, and with no lnd in it: a failed exec must not count as stopped.
+wait_for "the SHA256 node to stop and wait" 60 \
+    sh -c "$C exec -T lf3-sha256 sh -c '! pidof lnd' >/dev/null 2>&1"
+[ "$(docker inspect -f '{{.State.Running}}' "$($C ps -q lf3-sha256)")" = true ] \
+    || fail "the SHA256 node's container is not running"
 wait_for "the bridge to say so" 120 \
-    sh -c "[ \"\$($C exec -T lf3 lncli --network=regtest bridge status | jq -r .sha256_node.state)\" != ready ]"
+    sh -c "$C exec -T lf3 lncli --network=regtest bridge status | jq -e '.sha256_node.state != \"ready\"' >/dev/null"
 pass "with no file the SHA256 node stops and waits, and the bridge says it is not ready"
 write_conf
 wait_for "the bridge to reach it once the file is back" 300 \

@@ -22,7 +22,10 @@
 #   reads its chain node by RPC polling, and stops when the file changes or
 #   goes, so its restart policy starts it again on what is there. The shell
 #   is the Umbrel package's, but for the lab's paths, network and a shorter
-#   polling interval. Unlike Umbrel it runs as root, as lf3 does.
+#   polling interval. Unlike Umbrel it runs as root (as lf3 does), from the
+#   image by tag rather than digest, and with no Tor: it advertises
+#   lf3-sha256:9739 instead of an onion of its own, so the Umbrel node's
+#   onion is not exercised here.
 #
 # Layered over docker-compose.yml:
 #   docker compose -f docker-compose.yml -f docker-compose.supervised.yml up -d lf3 lf3-sha256
@@ -66,6 +69,8 @@ services:
   lf3-sha256:
     image: lightninglabs/lnd:v0.21.4-beta
     restart: unless-stopped
+    # As on Umbrel: lnd closes its databases on the way out.
+    stop_grace_period: 1m
     networks: [lab]
     depends_on:
       - lf3
