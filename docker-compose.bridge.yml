@@ -39,6 +39,7 @@ services:
       # A rate that makes the arithmetic easy to check by eye: 1 BTC per
       # BTCB2, so incoming and outgoing millisatoshis differ only by the
       # spread. A real one is nowhere near this.
+      - --bridgerpc.ratesource=fixed
       - --bridgerpc.fixedrate=1.0
       - --bridgerpc.spread=0.01
     volumes:

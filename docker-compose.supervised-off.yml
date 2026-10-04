@@ -26,4 +26,5 @@ services:
       - --protocol.simple-taproot-chans
       - --bridgerpc.sha256.supervised
       - --bridgerpc.sha256.rpchost=lf3-sha256:10019
+      - --bridgerpc.ratesource=fixed
       - --bridgerpc.spread=0.01

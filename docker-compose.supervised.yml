@@ -60,6 +60,7 @@ services:
       - --bridgerpc.tosha256
       - --bridgerpc.sha256.supervised
       - --bridgerpc.sha256.rpchost=lf3-sha256:10019
+      - --bridgerpc.ratesource=fixed
       - --bridgerpc.spread=0.01
       # No rate: the bridge starts and refuses to quote until one is set,
       # which is the first-run state the scenario checks.
