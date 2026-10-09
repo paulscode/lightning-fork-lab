@@ -52,30 +52,37 @@ pass "lf1 and CLN connected"
 step "lf1 opens to CLN (Lightning Fork funds, CLN accepts)"
 lf1 openchannel --node_key="$cln_id" --local_amt=1000000 --push_amt=100000 >/dev/null
 mine 6
-wait_for "lf1->CLN active" 120 sh -c "[ \"\$(docker compose exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" -ge 1 ]"
-lf1 listchannels | jq -e '.channels[0].unified_sigs == true' >/dev/null && pass "channel open, unified sigs"
+# Only the channels with CLN count: lf1 may have others in the lab.
+cln_chans() { docker compose exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq --arg c "$cln_id" '[.channels[] | select(.remote_pubkey == $c)]'; }
+wait_for "lf1->CLN active" 120 sh -c "[ \"\$(docker compose exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq --arg c $cln_id '[.channels[] | select(.active and .remote_pubkey == \$c)] | length')\" -ge 1 ]"
+cln_chans | jq -e 'length == 1 and .[0].unified_sigs == true' >/dev/null || fail "lf1->CLN channel not unified"
+pass "channel open, unified sigs"
 
 step "CLN opens to lf1 (CLN funds, Lightning Fork accepts)"
 C fundchannel "$lf1_id" 800000 >/dev/null
 mine 6
-wait_for "CLN->lf1 active" 120 sh -c "[ \"\$(docker compose exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" -ge 2 ]"
-lf1 listchannels | jq -e '[.channels[] | select(.unified_sigs == true)] | length == 2' >/dev/null && pass "both channels unified"
+wait_for "CLN->lf1 active" 120 sh -c "[ \"\$(docker compose exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq --arg c $cln_id '[.channels[] | select(.active and .remote_pubkey == \$c)] | length')\" -ge 2 ]"
+cln_chans | jq -e 'map(select(.unified_sigs == true)) | length == 2' >/dev/null || fail "not both channels unified"
+pass "both channels unified"
 
 step "payments both ways"
 mine 1
 inv=$(C invoice 50000000 "lf-to-cln-$RANDOM" "lf1 pays CLN" | jq -r .bolt11)
-lf1 payinvoice --force --json "$inv" | jq -e '.status == "SUCCEEDED"' >/dev/null && pass "lf1 paid CLN"
+lf1 payinvoice --force --json "$inv" | jq -e '.status == "SUCCEEDED"' >/dev/null || fail "lf1 could not pay CLN"
+pass "lf1 paid CLN"
 inv=$(lf1 addinvoice --amt 40000 | jq -r .payment_request)
 # pay prints a "# ->" progress line before its JSON.
-C pay "$inv" | sed '/^#/d' | jq -e '.status == "complete"' >/dev/null && pass "CLN paid lf1"
+C pay "$inv" | sed '/^#/d' | jq -e '.status == "complete"' >/dev/null || fail "CLN could not pay lf1"
+pass "CLN paid lf1"
 
 step "cooperative close from each side"
-chan=$(lf1 listchannels | jq -r '[.channels[] | select(.initiator == true)][0].channel_point')
+chan=$(cln_chans | jq -r '[.[] | select(.initiator == true)][0].channel_point')
 lf1 closechannel --funding_txid="${chan%:*}" --output_index="${chan#*:}" >/dev/null &
 sleep 5; mine 1; wait
 other=$(C listpeerchannels | jq -r '[.channels[] | select(.opener == "local" and .state == "CHANNELD_NORMAL")][0].short_channel_id')
 C close "$other" >/dev/null
 mine 6
-wait_for "both closed" 120 sh -c "[ \"\$(docker compose exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '.channels | length')\" = 0 ]"
-lf1 closedchannels | jq -e '[.channels[] | select(.close_type == "COOPERATIVE_CLOSE")] | length == 2' >/dev/null && pass "both closed cooperatively"
+wait_for "both closed" 120 sh -c "[ \"\$(docker compose exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq --arg c $cln_id '[.channels[] | select(.remote_pubkey == \$c)] | length')\" = 0 ]"
+lf1 closedchannels | jq -e --arg c "$cln_id" '[.channels[] | select(.remote_pubkey == $c and .close_type == "COOPERATIVE_CLOSE")] | length == 2' >/dev/null || fail "not both closed cooperatively"
+pass "both closed cooperatively"
 echo "INTEROP PASS"
