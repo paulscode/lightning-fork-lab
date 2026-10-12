@@ -38,3 +38,37 @@ wait_synced() {
 	wait_for "sp-lf synced" 120 lf_synced
 	wait_for "sp-cln synced" 120 cln_synced
 }
+
+# A Lightning Fork node with a seed, so its channels can be restored from a
+# backup: created through the REST wallet unlocker.
+start_seeded() {
+	local n=$1
+	docker run -d --name "$n" --network $N -v "$n-data:/root/.lnd" "$LF_IMAGE" \
+		--bitcoin.regtest --bitcoin.node=bitcoind \
+		--bitcoin.blake2b-activation-height="${ACTIVATION_HEIGHT:-20}" \
+		--fee.url=http://fees:8080/fees.json \
+		--bitcoind.rpchost=knots-b2b:18443 --bitcoind.rpcuser=lab --bitcoind.rpcpass=lab \
+		--bitcoind.zmqpubrawblock=tcp://knots-b2b:28332 --bitcoind.zmqpubrawtx=tcp://knots-b2b:28333 \
+		--rpclisten=0.0.0.0:10009 --restlisten=0.0.0.0:8080 --listen=0.0.0.0:9735 \
+		--externalip="$n:9735" --tlsextradomain="$n" --alias="$n" \
+		--debuglevel=info,PEER=debug,SPLC=trace,CNCT=debug,CHBU=debug \
+		--protocol.splice >/dev/null
+	wait_for "$n REST up" 60 sh -c "docker exec $n curl -sk https://127.0.0.1:8080/v1/genseed >/dev/null"
+}
+
+# init_wallet NODE MNEMONIC_JSON [BACKUP_FILE]: creates the wallet from a
+# seed, restoring the channels of a multi-channel backup if given.
+init_wallet() {
+	local n=$1 seed=$2 backup=${3:-}
+	local pw; pw=$(printf 'labpassword' | base64)
+	local body
+	if [ -n "$backup" ]; then
+		body=$(jq -nc --arg pw "$pw" --argjson seed "$seed" --arg b "$(base64 -w0 < "$backup")" \
+			'{wallet_password: $pw, cipher_seed_mnemonic: $seed, recovery_window: 200, channel_backups: {multi_chan_backup: {multi_chan_backup: $b}}}')
+	else
+		body=$(jq -nc --arg pw "$pw" --argjson seed "$seed" \
+			'{wallet_password: $pw, cipher_seed_mnemonic: $seed}')
+	fi
+	docker exec "$n" curl -sk -X POST https://127.0.0.1:8080/v1/initwallet -d "$body" >/dev/null
+	wait_for "$n RPC up" 60 sh -c "docker exec $n lncli --network=regtest getinfo >/dev/null"
+}
