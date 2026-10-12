@@ -11,14 +11,15 @@ lf()  { docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 "$
 cln() { docker exec sp-cln lightning-cli --network=regtest --lightning-dir=/data "$@"; }
 
 start_lf() {
-	docker run -d --name sp-lf --network $N -v sp-lf-data:/root/.lnd "$LF_IMAGE" \
+	local n=${1:-sp-lf}
+	docker run -d --name "$n" --network $N -v "$n-data:/root/.lnd" "$LF_IMAGE" \
 		--noseedbackup --bitcoin.regtest --bitcoin.node=bitcoind \
 		--bitcoin.blake2b-activation-height="${ACTIVATION_HEIGHT:-20}" \
 		--fee.url=http://fees:8080/fees.json \
 		--bitcoind.rpchost=knots-b2b:18443 --bitcoind.rpcuser=lab --bitcoind.rpcpass=lab \
 		--bitcoind.zmqpubrawblock=tcp://knots-b2b:28332 --bitcoind.zmqpubrawtx=tcp://knots-b2b:28333 \
-		--rpclisten=0.0.0.0:10009 --listen=0.0.0.0:9735 --externalip=sp-lf:9735 \
-		--tlsextradomain=sp-lf --alias=sp-lf \
+		--rpclisten=0.0.0.0:10009 --listen=0.0.0.0:9735 --externalip="$n:9735" \
+		--tlsextradomain="$n" --alias="$n" \
 		--debuglevel=info,PEER=debug,SPLC=trace,HSWC=debug,CNCT=debug,LNWL=debug,DISC=debug \
 		--protocol.splice --accept-keysend >/dev/null
 }
