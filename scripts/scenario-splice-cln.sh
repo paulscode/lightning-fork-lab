@@ -74,12 +74,15 @@ wait_for "channel open" 60 sh -c "[ \"\$(docker exec sp-cln lightning-cli --netw
 cln listpeerchannels | jq -e '.channels[0].channel_type.names | index("unified_sigs/even")' >/dev/null || fail "no unified_sigs"
 pass "a unified channel of 1,000,000 sat, splice_status $(lf_chan splice_status)"
 
-step "splice: Lightning Fork adds 300,000 sat"
+step "splice: Lightning Fork adds 300,000 sat, paying both ways while it is pending"
 lf_splice s1.log in --chan_point "$(lf_chan channel_point)" --amt 300000 --sat_per_vbyte 2
+# Every update now signs a commitment on each funding: start_batch.
+pay_both_ways s1-pending
+[ "$(lf_chan pending_splice.state)" = broadcast ] || fail "splice not pending"
 mine_b2b 6; wait_synced
 wait_for "locked at 1,300,000" 60 locked 1300000
 pay_both_ways s1
-pass "locked on both sides, payments both ways"
+pass "paid both ways while pending; locked on both sides, payments both ways"
 
 step "splice: Core Lightning adds 250,000 sat"
 docker exec sp-cln lightning-cli --network=regtest --lightning-dir=/data -J splicein "$(cln_cid)" 250000 | jq -e .txid >/dev/null \
