@@ -50,7 +50,7 @@ pass "channel of 1,000,000 sat"
 step "splice-lf: sp-lf adds 250,000, payments while pending"
 splice_on sp-lf a.log in --chan_point "$(c1 channel_point)" --amt 250000 --sat_per_vbyte 2
 pay_both pending1
-mine_b2b 6; both_synced
+mine_b2b 7; both_synced  # sp-lf2 locks a splice of sp-lf's coins at 7
 wait_for "locked at 1,250,000" 60 locked 1250000
 pay_both after1
 pass "locked, paid while pending and after"

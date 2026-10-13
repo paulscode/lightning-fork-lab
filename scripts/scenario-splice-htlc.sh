@@ -61,7 +61,7 @@ hash1=$(hold "$pre1" 40000)
 local_before=$(c1 local_balance)
 splice_on sp-lf a.log in --chan_point "$(c1 channel_point)" --amt 250000 --sat_per_vbyte 2
 [ "$(pending_htlcs)" = 1 ] || fail "the HTLC left the channel during the splice"
-mine_b2b 6; both_synced
+mine_b2b 7; both_synced  # sp-lf2 locks a splice of sp-lf's coins at 7
 wait_for "locked at 1,250,000" 60 locked 1250000
 [ "$(pending_htlcs)" = 1 ] || fail "the HTLC isn't on the spliced channel"
 pass "the HTLC stayed in flight through the splice; locked at 1,250,000"

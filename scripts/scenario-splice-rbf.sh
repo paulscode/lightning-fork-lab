@@ -47,7 +47,8 @@ state=$(cln listpeerchannels | jq -r '.channels[0].state')
 pass "replaced: $first by $second, the channel up ($state)"
 
 step "rbf: the candidate that confirms is locked"
-mine_b2b 6; wait_synced
+# Core Lightning's coins in it: one block more than our 6.
+mine_b2b 7; wait_synced
 wait_for "locked at 1,150,000" 90 sh -c "[ \"\$(docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -r '.channels[0].capacity')\" = 1150000 ] && [ \"\$(docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -r '.channels[0].pending_splice')\" = null ]"
 won=$(lf_chan channel_point | cut -d: -f1)
 [ "$won" = "$first" ] || [ "$won" = "$second" ] || fail "locked on $won, neither candidate"
@@ -55,5 +56,31 @@ wait_for "Core Lightning on the same funding" 60 sh -c "[ \"\$(docker exec sp-cl
 inv=$(cln invoice 10000000 rbf-after x | jq -r .bolt11)
 lf payinvoice --force "$inv" 2>&1 | grep -q SUCCEEDED || fail "payment after the lock failed"
 pass "both locked on $won ($( [ "$won" = "$first" ] && echo the original || echo the replacement )), a payment goes through"
+
+step "rbf: Core Lightning splices while a splice of Lightning Fork's is pending"
+# At the floor: Core Lightning replaces at its floor rate, and a
+# replacement at a lower rate than ours is refused.
+docker exec -d sp-lf sh -c "lncli --network=regtest --rpcserver=127.0.0.1:10009 splice in --chan_point $(lf_chan channel_point) --amt 100000 --sat_per_vbyte 1 > /tmp/ours.log 2>&1"
+wait_for "our splice broadcast" 60 sh -c "docker exec sp-lf grep -q '\"broadcast\"' /tmp/ours.log"
+ours=$(lf_chan pending_splice.txid)
+cap=$(lf_chan capacity)
+# Our splice pending, the channel is CHANNELD_AWAITING_SPLICE there.
+cid=$(cln listpeerchannels | jq -r '.channels[0].channel_id')
+out=$(docker exec sp-cln lightning-cli --network=regtest --lightning-dir=/data -J splicein "$cid" 50000 2>&1) || true
+echo "Core Lightning's splicein answered: $(echo "$out" | tr -d '\n' | cut -c1-160)"
+if echo "$out" | grep -q "Peer aborted"; then fail "Lightning Fork refused: $out"; fi
+wait_for "Lightning Fork logs the replacement" 30 sh -c "docker logs sp-lf 2>&1 | grep -q 'peer replaces splice $ours'"
+[ "$(cln listpeerchannels | jq -r '.channels[0].state')" != AWAITING_UNILATERAL ] || fail "Core Lightning failed the channel"
+mine_b2b 7; wait_synced
+wait_for "locked" 90 sh -c "[ \"\$(docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -r '.channels[0].pending_splice')\" = null ]"
+newcap=$(lf_chan capacity)
+case $((newcap - cap)) in
+	100000|150000) ;;
+	*) fail "capacity $cap became $newcap" ;;
+esac
+wait_for "Core Lightning on the same funding" 60 sh -c "[ \"\$(docker exec sp-cln lightning-cli --network=regtest --lightning-dir=/data listpeerchannels | jq -r '.channels[0].funding_txid')\" = \"\$(docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -r '.channels[0].channel_point' | cut -d: -f1)\" ]"
+inv=$(cln invoice 10000000 rbf-ours x | jq -r .bolt11)
+lf payinvoice --force "$inv" 2>&1 | grep -q SUCCEEDED || fail "payment after the lock failed"
+pass "Lightning Fork's 100,000 kept, the channel now $newcap (+$((newcap - cap))), a payment goes through"
 
 echo "rbf scenario: all steps passed"

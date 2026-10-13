@@ -49,20 +49,21 @@ txid=$(docker exec sp-cln lightning-cli --network=regtest --lightning-dir=/data 
 mine_b2b 1; wait_synced
 b2b getrawtransaction "$txid" true | jq -e --arg c "$coin" '[.vin[] | "\(.txid):\(.vout)"] | index($c)' >/dev/null \
 	|| fail "the splice doesn't spend Core Lightning's taproot coin"
-mine_b2b 5; wait_synced
+# 300,000 sat of the peer's: locked at 7.
+mine_b2b 6; wait_synced
 wait_for "locked at 1,300,000" 60 locked 1300000
 pass "locked; the splice spent the P2TR coin, its key path signature accepted"
 
 step "hold: a payment from Core Lightning drawing on what it put in"
 lf connect "$(cln getinfo | jq -r .id)@sp-cln:9735" >/dev/null 2>&1 || true
 wait_for "channel active" 60 sh -c "docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -e '.channels[0].active' >/dev/null"
-! cln_pays 100000 || fail "Core Lightning spent its spliced-in coins at 6 confirmations"
+! cln_pays 100000 || fail "Core Lightning spent its spliced-in coins at 7 confirmations"
 docker logs sp-lf 2>&1 | grep -q "draws on the peer's coins in a splice not yet deep enough" \
 	|| fail "no hold in Lightning Fork's log"
-pass "failed back at 6 confirmations, the hold in Lightning Fork's log"
+pass "failed back at 7 confirmations, the hold in Lightning Fork's log"
 
 step "hold: 36 confirmations later"
-mine_b2b 30; wait_synced
+mine_b2b 29; wait_synced
 ok=
 for i in 1 2 3 4 5; do
 	if cln_pays 100000; then ok=1; break; fi

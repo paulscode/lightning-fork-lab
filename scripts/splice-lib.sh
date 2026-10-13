@@ -10,8 +10,10 @@ CLN_IMAGE=${CLN_IMAGE:-cln-blake2b-release:v7}
 lf()  { docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 "$@"; }
 cln() { docker exec sp-cln lightning-cli --network=regtest --lightning-dir=/data "$@"; }
 
+# start_lf [NAME [FLAGS...]]: extra flags go to lnd.
 start_lf() {
 	local n=${1:-sp-lf}
+	[ $# -gt 0 ] && shift
 	docker run -d --name "$n" --network $N -v "$n-data:/root/.lnd" "$LF_IMAGE" \
 		--noseedbackup --bitcoin.regtest --bitcoin.node=bitcoind \
 		--bitcoin.blake2b-activation-height="${ACTIVATION_HEIGHT:-20}" \
@@ -21,7 +23,7 @@ start_lf() {
 		--rpclisten=0.0.0.0:10009 --listen=0.0.0.0:9735 --externalip="$n:9735" \
 		--tlsextradomain="$n" --alias="$n" \
 		--debuglevel=info,PEER=debug,SPLC=trace,HSWC=debug,CNCT=debug,LNWL=debug,DISC=debug \
-		--protocol.splice --accept-keysend >/dev/null
+		--protocol.splice --accept-keysend "$@" >/dev/null
 }
 
 start_cln() {

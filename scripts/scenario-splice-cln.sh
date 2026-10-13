@@ -87,7 +87,8 @@ pass "paid both ways while pending; locked on both sides, payments both ways"
 step "splice: Core Lightning adds 250,000 sat"
 docker exec sp-cln lightning-cli --network=regtest --lightning-dir=/data -J splicein "$(cln_cid)" 250000 | jq -e .txid >/dev/null \
 	|| fail "Core Lightning's splice-in failed"
-mine_b2b 6; wait_synced
+# Coins of the peer's: one block more than our 6 for 250,000 sat.
+mine_b2b 7; wait_synced
 wait_for "locked at 1,550,000" 60 locked 1550000
 reconnect
 pay_both_ways s2
