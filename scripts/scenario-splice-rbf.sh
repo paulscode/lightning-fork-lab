@@ -30,8 +30,7 @@ pass "a channel of 1,000,000 sat"
 
 step "rbf: Core Lightning splices in, then tries to replace it"
 cid=$(cln_chan channel_id)
-first=$(docker exec sp-cln lightning-cli --network=regtest --lightning-dir=/data -J splicein "$cid" 150000 | jq -r .txid)
-[ -n "$first" ] && [ "$first" != null ] || fail "first splice-in failed"
+first=$(cln_splicein "$cid" 150000)
 wait_for "pending at Lightning Fork" 60 sh -c "[ \"\$(docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -r '.channels[0].pending_splice.txid')\" = $first ]"
 # At the fee floor the port replaces at the same rate: the protocol runs to
 # the end, and then its own broadcast is refused by the mempool (it doesn't

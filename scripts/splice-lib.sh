@@ -35,6 +35,16 @@ start_cln() {
 		--disable-plugin=cln-bip353 --experimental-splicing >/dev/null
 }
 
+# cln_splicein CHANNEL_ID SATS: Core Lightning splices in; prints the txid,
+# or fails with what it answered.
+cln_splicein() {
+	local out txid
+	out=$(cln -J splicein "$1" "$2" 2>&1) || true
+	txid=$(echo "$out" | jq -r '.txid // empty' 2>/dev/null) || true
+	[ -n "$txid" ] || fail "Core Lightning's splice-in failed: $(echo "$out" | tr -d '\n' | cut -c1-300)"
+	echo "$txid"
+}
+
 lf_synced()  { [ "$(lf getinfo 2>/dev/null | jq -r .synced_to_chain)" = true ]; }
 cln_synced() { [ "$(cln getinfo 2>/dev/null | jq -r .blockheight)" = "$(b2b getblockcount)" ]; }
 wait_synced() {

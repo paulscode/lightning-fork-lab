@@ -48,7 +48,7 @@ mine_b2b 6; wait_synced_a
 wait_for "locked at 1,000,000" 120 a_locked 1000000
 la exportchanbackup --all --output_file /root/.lnd/stale.backup >/dev/null
 docker cp sp-lfa:/root/.lnd/stale.backup /tmp/splice-lab/stale.backup
-docker exec sp-cln lightning-cli --network=regtest --lightning-dir=/data -J splicein "$(cln_cid)" 150000 | jq -e .txid >/dev/null
+cln_splicein "$(cln_cid)" 150000 >/dev/null
 mine_b2b 7; wait_synced_a
 wait_for "locked at 1,150,000" 120 a_locked 1150000
 local_bal=$(a_chan local_balance)

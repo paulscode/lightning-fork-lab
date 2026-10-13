@@ -44,8 +44,7 @@ wait_for "channel open" 60 sh -c "[ \"\$(docker exec sp-cln lightning-cli --netw
 pass "a channel of 1,000,000 sat, all on Lightning Fork's side; Core Lightning's one coin $coin is P2TR"
 
 step "hold: Core Lightning adds 300,000 sat from its taproot coin"
-txid=$(docker exec sp-cln lightning-cli --network=regtest --lightning-dir=/data -J splicein "$(cln_chan channel_id)" 300000 | jq -r .txid)
-[ -n "$txid" ] && [ "$txid" != null ] || fail "Core Lightning's splice-in failed"
+txid=$(cln_splicein "$(cln_chan channel_id)" 300000)
 mine_b2b 1; wait_synced
 b2b getrawtransaction "$txid" true | jq -e --arg c "$coin" '[.vin[] | "\(.txid):\(.vout)"] | index($c)' >/dev/null \
 	|| fail "the splice doesn't spend Core Lightning's taproot coin"
