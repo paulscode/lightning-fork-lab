@@ -35,6 +35,16 @@ start_cln() {
 		--disable-plugin=cln-bip353 --experimental-splicing >/dev/null
 }
 
+# cln_reserve_p2wsh: reserves Core Lightning's P2WSH coins (outputs of
+# closed channels, a relative lock of one), which we refuse as splice
+# inputs by design, so its splices pick another.
+cln_reserve_p2wsh() {
+	local utxos
+	utxos=$(cln listfunds | jq -c '[.outputs[] | select(.status == "confirmed" and (.reserved | not) and (.scriptpubkey | startswith("0020"))) | "\(.txid):\(.output)"]')
+	[ "$utxos" = "[]" ] && return 0
+	cln -k utxopsbt satoshi=all feerate=253perkw startweight=0 utxos="$utxos" reserve=1000 >/dev/null
+}
+
 # cln_splicein CHANNEL_ID SATS: Core Lightning splices in; prints the txid,
 # or fails with what it answered.
 cln_splicein() {
