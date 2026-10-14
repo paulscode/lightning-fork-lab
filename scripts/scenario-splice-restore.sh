@@ -50,7 +50,7 @@ la exportchanbackup --all --output_file /root/.lnd/stale.backup >/dev/null
 docker cp sp-lfa:/root/.lnd/stale.backup /tmp/splice-lab/stale.backup
 cln_reserve_p2wsh
 cln_splicein "$(cln_cid)" 150000 >/dev/null
-mine_b2b 7; wait_synced_a
+mine_b2b 36; wait_synced_a
 wait_for "locked at 1,150,000" 120 a_locked 1150000
 local_bal=$(a_chan local_balance)
 pass "spliced twice; the backup knows only the first; local balance $local_bal"

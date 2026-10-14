@@ -78,7 +78,7 @@ pending=$(rounds 3)
 pass "$pending backups, one per commitment"
 
 step "splice-tower: after the lock"
-mine_b2b 7; all_synced  # sp-lf2 locks a splice of sp-lf's coins at 7
+mine_b2b 36; all_synced  # sp-lf2 locks a splice of sp-lf's coins deeper, by its inputs
 wait_for "locked at 1,250,000" 120 locked 1250000
 after=$(rounds 3)
 # The height signed last before the lock has a commitment on both fundings,

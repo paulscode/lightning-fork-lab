@@ -86,8 +86,8 @@ pass "paid both ways while pending; locked on both sides, payments both ways"
 
 step "splice: Core Lightning adds 250,000 sat"
 cln_splicein "$(cln_cid)" 250000 >/dev/null
-# Coins of the peer's: one block more than our 6 for 250,000 sat.
-mine_b2b 7; wait_synced
+# Coins of the peer's: deeper by the value of its inputs, up to 36.
+mine_b2b 36; wait_synced
 wait_for "locked at 1,550,000" 60 locked 1550000
 reconnect
 pay_both_ways s2

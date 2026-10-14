@@ -31,7 +31,9 @@ ensure_b2b_funds 5
 b2b -rpcwallet=lab sendtoaddress "$(lf newaddress p2wkh | jq -r .address)" 2 >/dev/null
 taproot=$(cln newaddr p2tr | jq -r .p2tr)
 case "$taproot" in bcrt1p*) ;; *) fail "no taproot address from Core Lightning: $taproot" ;; esac
-b2b -rpcwallet=lab sendtoaddress "$taproot" 1 >/dev/null
+# 350,000 sat: the lock depth grows with the value of the peer's inputs,
+# so a small coin keeps the lock at 7, well before the hold ends at 36.
+b2b -rpcwallet=lab sendtoaddress "$taproot" 0.0035 >/dev/null
 mine_b2b 6; wait_synced
 wait_for "Core Lightning sees its coin" 60 sh -c "docker exec sp-cln lightning-cli --network=regtest --lightning-dir=/data listfunds | jq -e '[.outputs[] | select(.status == \"confirmed\")] | length == 1' >/dev/null"
 coin=$(cln listfunds | jq -r '.outputs[0] | "\(.txid):\(.output)"')
@@ -48,7 +50,7 @@ txid=$(cln_splicein "$(cln_chan channel_id)" 300000)
 mine_b2b 1; wait_synced
 b2b getrawtransaction "$txid" true | jq -e --arg c "$coin" '[.vin[] | "\(.txid):\(.vout)"] | index($c)' >/dev/null \
 	|| fail "the splice doesn't spend Core Lightning's taproot coin"
-# 300,000 sat of the peer's: locked at 7.
+# Inputs of 350,000 sat of the peer's: locked at 7.
 mine_b2b 6; wait_synced
 wait_for "locked at 1,300,000" 60 locked 1300000
 pass "locked; the splice spent the P2TR coin, its key path signature accepted"

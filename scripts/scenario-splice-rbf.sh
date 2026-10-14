@@ -47,7 +47,7 @@ pass "replaced: $first by $second, the channel up ($state)"
 
 step "rbf: the candidate that confirms is locked"
 # Core Lightning's coins in it: one block more than our 6.
-mine_b2b 7; wait_synced
+mine_b2b 36; wait_synced
 wait_for "locked at 1,150,000" 90 sh -c "[ \"\$(docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -r '.channels[0].capacity')\" = 1150000 ] && [ \"\$(docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -r '.channels[0].pending_splice')\" = null ]"
 won=$(lf_chan channel_point | cut -d: -f1)
 [ "$won" = "$first" ] || [ "$won" = "$second" ] || fail "locked on $won, neither candidate"
@@ -70,7 +70,7 @@ echo "Core Lightning's splicein answered: $(echo "$out" | tr -d '\n' | cut -c1-1
 if echo "$out" | grep -q "Peer aborted"; then fail "Lightning Fork refused: $out"; fi
 wait_for "Lightning Fork logs the replacement" 30 sh -c "docker logs sp-lf 2>&1 | grep -q 'peer replaces splice $ours'"
 [ "$(cln listpeerchannels | jq -r '.channels[0].state')" != AWAITING_UNILATERAL ] || fail "Core Lightning failed the channel"
-mine_b2b 7; wait_synced
+mine_b2b 36; wait_synced
 wait_for "locked" 90 sh -c "[ \"\$(docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq -r '.channels[0].pending_splice')\" = null ]"
 newcap=$(lf_chan capacity)
 case $((newcap - cap)) in
