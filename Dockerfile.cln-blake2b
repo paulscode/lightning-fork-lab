@@ -15,9 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gettext protobuf-compiler jq pkg-config libpq-dev ca-certificates lowdown \
     && rm -rf /var/lib/apt/lists/* \
     && pip3 install --break-system-packages uv grpcio-tools
-# grpcio-tools because the chain-identity series edits cln-grpc/proto/node.proto,
-# and git am does not promise to write a .proto before the stubs generated from
-# it, so make sometimes decides they are stale and regenerates them.
+# grpcio-tools because a checkout does not promise to write
+# cln-grpc/proto/node.proto before the stubs generated from it, so make
+# sometimes decides they are stale and regenerates them.
 RUN git clone "$CLN_REPO" /src && git -C /src checkout -q "$CLN_REF"
 WORKDIR /src
 RUN ./configure --disable-rust --disable-valgrind \

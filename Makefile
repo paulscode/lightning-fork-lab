@@ -86,6 +86,9 @@ offer-latency:
 # Needs the .4 image: make cln-release CLN_RELEASE=v26.06.7-blake2b.4 with the
 # tag overridden, see the script header.
 cln-pytest:
+	rm -rf build/cln-patches && mkdir -p build/cln-patches
+	cp $(FORK_DIR)/contrib/cln-chain-identity/*.patch build/cln-patches/
+	id=$$(docker create --pull=never knots-blake2b:final-zmq) && { docker cp $$id:/usr/local/bin/bitcoind build/bitcoind && docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli; rc=$$?; docker rm $$id >/dev/null; exit $$rc; }
 	docker build -f Dockerfile.cln-pytest -t cln-pytest:lab .
 	docker run --rm --entrypoint python3 cln-pytest:lab -m pytest -q \
 		--timeout=600 -p no:cacheprovider $(PYTEST_ARGS)
@@ -220,7 +223,7 @@ cln-vanilla:
 # from source (minutes). The chain-identity series has landed there.
 cln:
 	mkdir -p build
-	id=$$(docker create knots-blake2b:final-zmq) && docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli && docker rm $$id >/dev/null
+	id=$$(docker create --pull=never knots-blake2b:final-zmq) && { docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli; rc=$$?; docker rm $$id >/dev/null; exit $$rc; }
 	$(COMPOSE) --profile cln build cln
 	$(COMPOSE) --profile cln up -d cln
 
@@ -245,7 +248,7 @@ CLN_RELEASE ?= v26.06.7-blake2b.3
 CLN_TARBALL ?= clightning-$(CLN_RELEASE)-Ubuntu-24.04-amd64.tar.xz
 cln-release:
 	mkdir -p build
-	id=$$(docker create knots-blake2b:final-zmq) && docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli && docker rm $$id >/dev/null
+	id=$$(docker create --pull=never knots-blake2b:final-zmq) && { docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli; rc=$$?; docker rm $$id >/dev/null; exit $$rc; }
 	[ -f build/$(CLN_TARBALL) ] || gh release download $(CLN_RELEASE) --repo privkeyio/lightning -p '$(CLN_TARBALL)' -p 'SHA256SUMS-$(CLN_RELEASE)' -D build
 	cd build && grep '$(CLN_TARBALL)' SHA256SUMS-$(CLN_RELEASE) | sha256sum -c
 	docker build -f Dockerfile.cln-release --build-arg CLN_TARBALL=$(CLN_TARBALL) -t cln-blake2b-release:lab .

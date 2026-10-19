@@ -28,19 +28,30 @@ CLN_CONTAINER=${CLN_CONTAINER:-lightning-fork-lab-cln-1}
 AMT="${AMT:-2000000}"
 cln() { docker exec "$CLN_CONTAINER" lightning-cli --network=regtest --lightning-dir=/data "$@"; }
 cln_synced() { [ "$(cln getinfo | jq -r .blockheight)" = "$(b2b getblockcount)" ]; }
+# Values read from a node or the bridge are checked before any arithmetic.
+is_num() { [[ ${1:-} =~ ^[0-9]+$ ]]; }
 
-# REST on lf1 from the Core Lightning container. Prints the body, then the
-# HTTP status on its own line, so a caller can check both. The certificate is
-# not checked by curl; the pin is checked once, below, the way a payer would.
+# The participant's macaroon is revoked, and the certificate files removed,
+# however the scenario ends.
+ROOT_KEY_ID="" OP_PEM="" PAYER_PEM=""
+cleanup() {
+	! is_num "$ROOT_KEY_ID" || lf1 deletemacaroonid "$ROOT_KEY_ID" >/dev/null 2>&1 || true
+	[ -z "$OP_PEM$PAYER_PEM" ] || docker exec "$CLN_CONTAINER" rm -f $OP_PEM $PAYER_PEM >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+# REST on lf1 from the Core Lightning container, with curl checking lf1's
+# certificate against CA, a PEM file in that container: lf1's own for the
+# operator, and for the payer the one the endpoint served and that was checked
+# against the code's pin, below. Prints the body, then the HTTP status on its
+# own line, so a caller can check both. No HTTP answer at all, a refused
+# certificate included, fails the scenario.
 rest_as() {
-	local mac="$1" method="$2" path="$3" body="${4:-}"
-	if [ -n "$body" ]; then
-		docker exec "$CLN_CONTAINER" curl -s -k -w '\n%{http_code}' -X "$method" \
-			-H "Grpc-Metadata-macaroon: $mac" -d "$body" "https://lf1:8080$path"
-	else
-		docker exec "$CLN_CONTAINER" curl -s -k -w '\n%{http_code}' -X "$method" \
-			-H "Grpc-Metadata-macaroon: $mac" "https://lf1:8080$path"
-	fi
+	local ca="$1" mac="$2" method="$3" path="$4" body="${5:-}" data=()
+	[ -z "$body" ] || data=(-d "$body")
+	docker exec "$CLN_CONTAINER" curl -sS --cacert "$ca" -w '\n%{http_code}' -X "$method" \
+		-H "Grpc-Metadata-macaroon: $mac" "${data[@]}" "https://lf1:8080$path" \
+		|| fail "no HTTP answer from lf1:8080$path (curl exit $?)"
 }
 
 admin_mac() {
@@ -49,10 +60,10 @@ admin_mac() {
 }
 
 # The operator's status call, for readiness only; the payer never makes it.
-status() { rest_as "$(admin_mac)" GET /v2/bridge/status | sed '$d'; }
+status() { rest_as "$OP_PEM" "$(admin_mac)" GET /v2/bridge/status | sed '$d'; }
 
 # The payer's calls, with the participant's macaroon from the bridge code.
-payer() { rest_as "$PMAC" POST "/v2/bridge/$1" "$2" | sed '$d'; }
+payer() { rest_as "$PAYER_PEM" "$PMAC" POST "/v2/bridge/$1" "$2" | sed '$d'; }
 
 b64_to_hex() { echo "$1" | base64 -d | od -An -tx1 -v | tr -d ' \n'; }
 sha256_hex() { echo -n "$1" | python3 -c 'import hashlib, sys; print(hashlib.sha256(bytes.fromhex(sys.stdin.read())).hexdigest())'; }
@@ -103,6 +114,8 @@ cln_payer_checks() {
 	hh=$(echo "$dec" | jq -r .payment_hash); dh=$(echo "$ddec" | jq -r .payment_hash)
 	payee=$(echo "$dec" | jq -r .payee); feat=$(echo "$dec" | jq -r '.features // ""')
 	amt=$(echo "$dec" | jq -r .amount_msat); exp=$(echo "$q" | jq -r .expires_at); now=$(date +%s)
+	is_num "$amt" && is_num "$exp" && is_num "$agreed" \
+		|| { echo "amount '$amt', expires_at '$exp' or estimate '$agreed' is not a number"; return 1; }
 	[ "$hh" = "$dh" ] && [ "$hh" = "$(b64_to_hex "$(echo "$q" | jq -r .hash)")" ] \
 		|| { echo "1: the hold invoice is for $hh, the destination's for $dh"; return 1; }
 	[ "$payee" = "$CODE_NODE" ] || { echo "2: the hold invoice pays $payee, not $CODE_NODE"; return 1; }
@@ -113,13 +126,24 @@ cln_payer_checks() {
 	echo "hash $hh, payee $payee, $amt msat <= $agreed, $((exp - now))s left"
 }
 
-cln_to_lf1_msat() { cln listpeerchannels "$LF1" | jq '[.channels[] | .to_us_msat] | add'; }
+# Core Lightning moves to_us_msat only once an HTLC is fully removed, after
+# `cln pay` has returned, so a balance is read with no HTLC left.
+cln_htlcs_clear() { [ "$(cln listpeerchannels "$LF1" | jq '[.channels[].htlcs[]] | length')" = 0 ]; }
+cln_to_lf1_msat() {
+	local v
+	wait_for "no HTLCs left between cln and lf1" 60 cln_htlcs_clear
+	v=$(cln listpeerchannels "$LF1" | jq '[.channels[] | .to_us_msat] | add')
+	is_num "$v" || fail "Core Lightning's balance with lf1 is '$v'"
+	echo "$v"
+}
 cln_peer_up() { [ "$(cln listpeerchannels "$LF1" | jq '[.channels[] | select(.state == "CHANNELD_NORMAL" and .peer_connected)] | length')" -ge 2 ]; }
 
 step "bridge-cln: Core Lightning's channels with lf1"
 wait_for "cln up" 120 cln getinfo
 LF1=$(pubkey_of lf1)
 CLN=$(cln getinfo | jq -r .id)
+OP_PEM=$(docker exec "$CLN_CONTAINER" mktemp)
+$COMPOSE exec -T lf1 cat /root/.lnd/tls.cert | docker exec -i "$CLN_CONTAINER" sh -c 'cat > "$1"' sh "$OP_PEM"
 mine_b2b 1
 wait_for "lf1 synced" 180 lnd_synced lf1
 wait_for "cln at the tip" 120 cln_synced
@@ -127,6 +151,7 @@ cln connect "$LF1@lf1:9735" >/dev/null
 opened=0
 # Forward and refund are paid from a channel Core Lightning opened.
 cln_out=$(cln listpeerchannels "$LF1" | jq '[.channels[] | select(.state == "CHANNELD_NORMAL") | .spendable_msat] | max // 0')
+is_num "$cln_out" || fail "Core Lightning's spendable balance with lf1 is '$cln_out'"
 if [ "$cln_out" -lt $((10 * AMT)) ]; then
 	if [ "$(cln listfunds | jq '[.outputs[] | select(.status == "confirmed")] | length')" = 0 ]; then
 		ensure_b2b_funds 2
@@ -144,6 +169,7 @@ if [ "$cln_out" -lt $((10 * AMT)) ]; then
 fi
 # The reverse direction is paid out by lf1, so it needs its own channel.
 lf1_out=$(lf1 listchannels | jq --arg p "$CLN" '[.channels[] | select(.active and .remote_pubkey == $p) | (.local_balance | tonumber)] | max // 0')
+is_num "$lf1_out" || fail "lf1's balance with Core Lightning is '$lf1_out'"
 if [ "$lf1_out" -lt 100000 ]; then
 	fund_lf lf1 2
 	lf1 openchannel --node_key="$CLN" --local_amt=1000000 >/dev/null
@@ -168,7 +194,8 @@ if [ "$opened" = 1 ] || ! status | jq -e '(.refusals | length) == 0' >/dev/null 
 	wait_for "cln at the tip after pacing" 180 cln_synced
 	wait_for "cln reconnected to lf1" 120 cln_peer_up
 fi
-pass "cln $CLN has $(cln_to_lf1_msat) msat with lf1 $LF1, over channels opened from each side"
+bal=$(cln_to_lf1_msat)
+pass "cln $CLN has $bal msat with lf1 $LF1, over channels opened from each side"
 
 step "bridge-cln: the payer's bridge code"
 wait_ready 300
@@ -180,6 +207,11 @@ if ! status | jq -e '.rate == 1' >/dev/null; then
 fi
 PIN=$($COMPOSE exec -T lf1 cat /root/.lnd/tls.cert | pin_of)
 code=$(lf1 bridge code --url https://lf1:8080 --label cln --cert "$PIN")
+# From the revoke command rather than .root_key_id: a uint64 can exceed what
+# an older jq reads exactly.
+revoke=$(echo "$code" | jq -r .revoke)
+ROOT_KEY_ID=${revoke#lncli deletemacaroonid }
+is_num "$ROOT_KEY_ID" || fail "no root key id in the code's revoke command: $revoke"
 CODEJSON=$(echo "$code" | jq -r .code | python3 -c '
 import base64, sys
 s = sys.stdin.read().strip()
@@ -188,11 +220,13 @@ s = s[len("lfbridge:"):]
 print(base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)).decode())')
 PMAC=$(echo "$CODEJSON" | jq -r .macaroon)
 CODE_NODE=$(echo "$CODEJSON" | jq -r .node)
-served=$(docker exec "$CLN_CONTAINER" python3 -c 'import ssl; print(ssl.get_server_certificate(("lf1", 8080)))' | pin_of)
+PAYER_PEM=$(docker exec "$CLN_CONTAINER" mktemp)
+docker exec "$CLN_CONTAINER" python3 -c 'import ssl, sys; open(sys.argv[1], "w").write(ssl.get_server_certificate(("lf1", 8080)))' "$PAYER_PEM"
+served=$(docker exec "$CLN_CONTAINER" cat "$PAYER_PEM" | pin_of)
 [ "$(echo "$CODEJSON" | jq -r .v)" = 1 ] || fail "code version: $CODEJSON"
 [ "$served" = "$(echo "$CODEJSON" | jq -r .cert)" ] || fail "lf1:8080 presents $served, the code pins $(echo "$CODEJSON" | jq -r .cert)"
 [ "$CODE_NODE" = "$LF1" ] || fail "the code names $CODE_NODE, lf1 is $LF1"
-INFO=$(rest_as "$PMAC" GET /v2/bridge/info | sed '$d')
+INFO=$(rest_as "$PAYER_PEM" "$PMAC" GET /v2/bridge/info | sed '$d')
 echo "$INFO" | jq -e --arg n "$CODE_NODE" '.version == 1 and .node == $n and ([.directions[] | select(.open)] | length == 2)' >/dev/null \
 	|| fail "info: $INFO"
 pass "code v1 for lf1; the endpoint presents the pinned certificate; info answers the participant, both directions open"
@@ -201,13 +235,14 @@ step "bridge-cln: Core Lightning pays a Bitcoin invoice through the bridge"
 dest=$(lndsha2 addinvoice --amt_msat="$AMT" --memo "from cln" | jq -r .payment_request)
 dhash=$(lndsha2 decodepayreq "$dest" | jq -r .payment_hash)
 agreed=$(estimate toSHA256 "$AMT")
+# Synced before quoting, so the hold invoice is paid as soon as it is checked.
+wait_for "cln at the tip" 120 cln_synced
+before=$(cln_to_lf1_msat)
 q=$(payer quote "{\"invoice\":\"$dest\"}")
 [ "$(echo "$q" | jq -r .direction)" = toSHA256 ] || fail "quote: $q"
 hash=$(echo "$q" | jq -r .hash)
 why=$(cln_payer_checks "$dest" "$q" "$agreed") || fail "payer check $why"
 pass "toSHA256 quote; all five payer checks hold on Core Lightning: $why"
-wait_for "cln at the tip" 120 cln_synced
-before=$(cln_to_lf1_msat)
 cln pay "$(echo "$q" | jq -r .hold_invoice)" >/dev/null 2>&1 &
 wait_for_state "$hash" settled 180
 wait
@@ -218,7 +253,11 @@ pre=$(cln listpays -k payment_hash="$dhash" | jq -r '.pays[] | select(.status ==
 [ -n "$pre" ] && [ "$(sha256_hex "$pre")" = "$dhash" ] || fail "Core Lightning holds no preimage for $dhash"
 [ "$(b64_to_hex "$(payer swap "{\"hash\":\"$hash\"}" | jq -r .preimage)")" = "$pre" ] \
 	|| fail "the bridge reports another preimage"
-pass "settled: lnd-sha2's invoice paid $AMT msat, Core Lightning paid $((before - $(cln_to_lf1_msat))) msat and holds the preimage"
+after=$(cln_to_lf1_msat)
+paid=$((before - after))
+[ "$paid" = "$(echo "$q" | jq -r .incoming_msat)" ] \
+	|| fail "Core Lightning paid $paid msat over its channels with lf1, the quote's incoming_msat is $(echo "$q" | jq -r .incoming_msat)"
+pass "settled: lnd-sha2's invoice paid $AMT msat, Core Lightning paid the quoted $paid msat and holds the preimage"
 
 step "bridge-cln: lnd-sha2 pays a Core Lightning invoice through the bridge"
 label="bridge-cln-$(date +%s)"
@@ -230,6 +269,9 @@ q=$(payer quote "{\"invoice\":\"$(echo "$cinv" | jq -r .bolt11)\"}")
 hash=$(echo "$q" | jq -r .hash)
 dec=$(lndsha2 decodepayreq "$(echo "$q" | jq -r .hold_invoice)")
 exp=$(echo "$q" | jq -r .expires_at)
+num=$(echo "$dec" | jq -r .num_msat)
+is_num "$exp" && is_num "$num" && is_num "$agreed" \
+	|| fail "amount '$num', expires_at '$exp' or estimate '$agreed' is not a number"
 # The same checks from the payer on the Bitcoin side. Checks 2 and 3 are
 # written for toSHA256; here the hold invoice is the bridge's Bitcoin node's,
 # so it pays lnd-sha and does not set option_blake2b.
@@ -237,8 +279,8 @@ exp=$(echo "$q" | jq -r .expires_at)
 	|| fail "1: the hold invoice is for $(echo "$dec" | jq -r .payment_hash), Core Lightning's for $chash"
 [ "$(echo "$dec" | jq -r .destination)" = "$(pubkey_of lnd-sha)" ] || fail "2: the hold invoice pays $(echo "$dec" | jq -r .destination)"
 echo "$dec" | jq -e '.features | has("512") or has("513") | not' >/dev/null || fail "3: a Bitcoin hold invoice sets option_blake2b"
-[ "$(echo "$dec" | jq -r .num_msat)" -le "$agreed" ] && [ "$(echo "$dec" | jq -r .num_msat)" = "$(echo "$q" | jq -r .incoming_msat)" ] \
-	|| fail "4: $(echo "$dec" | jq -r .num_msat) msat against $agreed agreed"
+[ "$num" -le "$agreed" ] && [ "$num" = "$(echo "$q" | jq -r .incoming_msat)" ] \
+	|| fail "4: $num msat against $agreed agreed"
 [ $((exp - $(date +%s))) -ge 10 ] || fail "5: too little time before expires_at"
 pass "toBLAKE2b quote; the payer's checks hold on lnd-sha2"
 lndsha2 payinvoice --force --timeout=120s "$(echo "$q" | jq -r .hold_invoice)" >/dev/null 2>&1 &
@@ -255,13 +297,13 @@ step "bridge-cln: the destination cancels, Core Lightning gets its money back"
 dest=$(lndsha2 addinvoice --amt_msat="$AMT" --memo "cancelled" | jq -r .payment_request)
 dhash=$(lndsha2 decodepayreq "$dest" | jq -r .payment_hash)
 agreed=$(estimate toSHA256 "$AMT")
+wait_for "cln at the tip" 120 cln_synced
+before=$(cln_to_lf1_msat)
 q=$(payer quote "{\"invoice\":\"$dest\"}")
 [ "$(echo "$q" | jq -r .direction)" = toSHA256 ] || fail "quote: $q"
 hash=$(echo "$q" | jq -r .hash)
 lndsha2 cancelinvoice "$dhash" >/dev/null
 why=$(cln_payer_checks "$dest" "$q" "$agreed") || fail "payer check $why"
-wait_for "cln at the tip" 120 cln_synced
-before=$(cln_to_lf1_msat)
 if cln pay "$(echo "$q" | jq -r .hold_invoice)" >/dev/null 2>&1; then
 	fail "Core Lightning paid through to a cancelled invoice"
 fi
@@ -270,9 +312,18 @@ pays=$(cln listpays -k payment_hash="$dhash")
 [ "$(echo "$pays" | jq '[.pays[] | select(.status == "complete")] | length')" = 0 ] \
 	&& [ "$(echo "$pays" | jq '[.pays[] | select(.status == "failed")] | length')" -ge 1 ] \
 	|| fail "Core Lightning's payments: $(echo "$pays" | jq -c '[.pays[] | {status, preimage}]')"
-wait_for "no HTLCs left between cln and lf1" 60 sh -c "[ \"\$(docker exec $CLN_CONTAINER lightning-cli --network=regtest --lightning-dir=/data listpeerchannels $LF1 | jq '[.channels[].htlcs[]] | length')\" = 0 ]"
-[ "$(cln_to_lf1_msat)" = "$before" ] || fail "Core Lightning's balance went from $before to $(cln_to_lf1_msat) msat"
+after=$(cln_to_lf1_msat)
+[ "$after" = "$before" ] || fail "Core Lightning's balance went from $before to $after msat"
 [ "$(lndsha2 lookupinvoice "$dhash" | jq -r .state)" = CANCELED ] || fail "lnd-sha2's invoice is not CANCELED"
 pass "failed; Core Lightning's pay failed with no preimage and its balance is unchanged at $before msat"
+
+step "bridge-cln: the participant's code revoked"
+lf1 deletemacaroonid "$ROOT_KEY_ID" >/dev/null
+out=$(rest_as "$PAYER_PEM" "$PMAC" GET /v2/bridge/info)
+http=$(echo "$out" | tail -1)
+# The macaroon store's answer for a deleted root key (macaroons/store.go).
+[ "$http" != 200 ] && echo "$out" | sed '$d' | jq -r .message | grep -qF "root key with id $ROOT_KEY_ID doesn't exist" \
+	|| fail "a revoked code still works, or is refused for another reason: HTTP $http $(echo "$out" | sed '$d')"
+pass "revoked: HTTP $http, root key $ROOT_KEY_ID doesn't exist"
 
 echo; echo "ALL CLN BRIDGE SCENARIOS PASSED"
