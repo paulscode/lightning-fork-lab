@@ -11,6 +11,7 @@
 #   make sha CMD="getblockcount"      bitcoin-cli on the SHA256d node
 #   make lf1 CMD="getinfo"            lncli on lf1 (also lf2, lndsha)
 #   make cln / make cln-interop       Core Lightning (BLAKE2b identity) and the interop scenario
+#   make bridge-cln                   the in-node bridge with Core Lightning paying and paid
 #   make flagday                      the 512/514 flag-day matrix (images overridable)
 #   make flagday-upgrade              a 68/70 unified channel carried across the flag day
 #   make legacy-force-close / legacy-gossip  what a node upgrading from .9 carries across
@@ -99,6 +100,12 @@ bridge-setup:
 # Needs bridge-setup and pace-blocks first, and lf1 up with the bridge overlay.
 bridge:
 	@scripts/scenario-bridge.sh
+
+# The same bridge with Core Lightning as the BLAKE2b-side payer and payee,
+# running the payer API's checks itself. Needs bridge-setup and cln first, and
+# lf1 up with the bridge overlay; opens Core Lightning's channels and paces.
+bridge-cln:
+	CLN_CONTAINER=lightning-fork-lab-cln-1 bash scripts/scenario-bridge-cln.sh
 
 scenarios: e3-sync e4b-refuse e4-isolation e7-replay channel restart bolt12 reorg
 	@echo "ALL SCENARIOS PASSED"
