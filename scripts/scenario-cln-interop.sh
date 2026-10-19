@@ -84,7 +84,7 @@ if ! docker compose logs --since 60s lnd-sha 2>&1 | grep -q "unknown required fe
 fi
 [ "$(cln listpeers "$sha_pub" | jq -r '.peers | length')" = 0 ] \
 	|| fail "lnd-sha is still a peer of cln, so the even bit did not separate them"
-pass "stock lnd hangs up on bit 68 and is not a peer"
+pass "stock lnd hangs up on an unknown required feature and is not a peer"
 
 step "cln-interop: funding the Core Lightning wallet"
 if [ "$(cln listfunds | jq '[.outputs[] | select(.status == "confirmed")] | length')" = 0 ]; then

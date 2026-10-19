@@ -1,14 +1,13 @@
-# Core Lightning on the Bitcoin BLAKE2b chain: the privkeyio port (header
-# parsing) plus the chain-identity patch series kept in the fork repository
-# (contrib/cln-chain-identity), built from source. The patches are
-# copied into build/cln-patches by `make cln`.
+# Core Lightning on the Bitcoin BLAKE2b chain: the privkeyio port, built from
+# source. The chain-identity series kept in the fork repository
+# (contrib/cln-chain-identity) has landed upstream, so nothing is applied.
 FROM ubuntu:24.04 AS builder
 ARG CLN_REPO=https://github.com/privkeyio/lightning
-# v26.06.7-blake2b.4 plus the inbound-requirement fix: the base the
-# chain-identity series targets. The previous pin, c6d386ff, was 50
-# commits earlier and predates OPT_BLAKE2B entirely, so it hung up on
-# bit 68 and no interop scenario could run against it.
-ARG CLN_REF=24d0273100c75eac99e0400f767267efde4b012c
+# blake2b-unified after the flag day, on v26.06.9: option_blake2b is 512 and
+# option_unified_sigs 514. The previous pin, 24d02731, was the base the
+# chain-identity series targeted and still advertised bit 68, so a current
+# Lightning Fork hangs up on it.
+ARG CLN_REF=c774ad19d1fa2b8d8b77914e13853e6f69f1f33f
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         autoconf automake build-essential git libtool libsqlite3-dev \
@@ -16,15 +15,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gettext protobuf-compiler jq pkg-config libpq-dev ca-certificates lowdown \
     && rm -rf /var/lib/apt/lists/* \
     && pip3 install --break-system-packages uv grpcio-tools
-# grpcio-tools because the chain-identity series edits cln-grpc/proto/node.proto,
-# and git am does not promise to write a .proto before the stubs generated from
-# it, so make sometimes decides they are stale and regenerates them.
+# grpcio-tools because a checkout does not promise to write
+# cln-grpc/proto/node.proto before the stubs generated from it, so make
+# sometimes decides they are stale and regenerates them.
 RUN git clone "$CLN_REPO" /src && git -C /src checkout -q "$CLN_REF"
 WORKDIR /src
-COPY build/cln-patches/ /patches/
-RUN git config user.email lab@example.invalid && git config user.name lab \
-    && git am /patches/*.patch \
-    && ./configure --disable-rust --disable-valgrind \
+RUN ./configure --disable-rust --disable-valgrind \
     && make -j"$(nproc)" \
     && make install DESTDIR=/out
 

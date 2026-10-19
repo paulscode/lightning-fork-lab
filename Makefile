@@ -11,6 +11,7 @@
 #   make sha CMD="getblockcount"      bitcoin-cli on the SHA256d node
 #   make lf1 CMD="getinfo"            lncli on lf1 (also lf2, lndsha)
 #   make cln / make cln-interop       Core Lightning (BLAKE2b identity) and the interop scenario
+#   make bridge-cln                   the in-node bridge with Core Lightning paying and paid
 #   make flagday                      the 512/514 flag-day matrix (images overridable)
 #   make flagday-upgrade              a 68/70 unified channel carried across the flag day
 #   make legacy-force-close / legacy-gossip  what a node upgrading from .9 carries across
@@ -85,6 +86,9 @@ offer-latency:
 # Needs the .4 image: make cln-release CLN_RELEASE=v26.06.7-blake2b.4 with the
 # tag overridden, see the script header.
 cln-pytest:
+	rm -rf build/cln-patches && mkdir -p build/cln-patches
+	cp $(FORK_DIR)/contrib/cln-chain-identity/*.patch build/cln-patches/
+	id=$$(docker create --pull=never knots-blake2b:final-zmq) && { docker cp $$id:/usr/local/bin/bitcoind build/bitcoind && docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli; rc=$$?; docker rm $$id >/dev/null; exit $$rc; }
 	docker build -f Dockerfile.cln-pytest -t cln-pytest:lab .
 	docker run --rm --entrypoint python3 cln-pytest:lab -m pytest -q \
 		--timeout=600 -p no:cacheprovider $(PYTEST_ARGS)
@@ -99,6 +103,12 @@ bridge-setup:
 # Needs bridge-setup and pace-blocks first, and lf1 up with the bridge overlay.
 bridge:
 	@scripts/scenario-bridge.sh
+
+# The same bridge with Core Lightning as the BLAKE2b-side payer and payee,
+# running the payer API's checks itself. Needs bridge-setup and cln first, and
+# lf1 up with the bridge overlay; opens Core Lightning's channels and paces.
+bridge-cln:
+	CLN_CONTAINER=lightning-fork-lab-cln-1 bash scripts/scenario-bridge-cln.sh
 
 scenarios: e3-sync e4b-refuse e4-isolation e7-replay channel restart bolt12 reorg
 	@echo "ALL SCENARIOS PASSED"
@@ -209,12 +219,11 @@ watchtower:
 cln-vanilla:
 	docker build -f Dockerfile.cln-vanilla -t cln-vanilla:lab .
 
-# Core Lightning with the BLAKE2b chain identity: the privkeyio port plus the
-# patch series in the fork repository, built from source (minutes).
+# Core Lightning with the BLAKE2b chain identity: the privkeyio port, built
+# from source (minutes). The chain-identity series has landed there.
 cln:
-	rm -rf build/cln-patches && mkdir -p build/cln-patches
-	cp $(FORK_DIR)/contrib/cln-chain-identity/*.patch build/cln-patches/
-	id=$$(docker create knots-blake2b:final-zmq) && docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli && docker rm $$id >/dev/null
+	mkdir -p build
+	id=$$(docker create --pull=never knots-blake2b:final-zmq) && { docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli; rc=$$?; docker rm $$id >/dev/null; exit $$rc; }
 	$(COMPOSE) --profile cln build cln
 	$(COMPOSE) --profile cln up -d cln
 
@@ -239,7 +248,7 @@ CLN_RELEASE ?= v26.06.7-blake2b.3
 CLN_TARBALL ?= clightning-$(CLN_RELEASE)-Ubuntu-24.04-amd64.tar.xz
 cln-release:
 	mkdir -p build
-	id=$$(docker create knots-blake2b:final-zmq) && docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli && docker rm $$id >/dev/null
+	id=$$(docker create --pull=never knots-blake2b:final-zmq) && { docker cp $$id:/usr/local/bin/bitcoin-cli build/bitcoin-cli; rc=$$?; docker rm $$id >/dev/null; exit $$rc; }
 	[ -f build/$(CLN_TARBALL) ] || gh release download $(CLN_RELEASE) --repo privkeyio/lightning -p '$(CLN_TARBALL)' -p 'SHA256SUMS-$(CLN_RELEASE)' -D build
 	cd build && grep '$(CLN_TARBALL)' SHA256SUMS-$(CLN_RELEASE) | sha256sum -c
 	docker build -f Dockerfile.cln-release --build-arg CLN_TARBALL=$(CLN_TARBALL) -t cln-blake2b-release:lab .
