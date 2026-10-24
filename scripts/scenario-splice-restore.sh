@@ -28,8 +28,11 @@ init_wallet sp-lfa "$seed"
 APUB=$(la getinfo | jq -r .identity_pubkey)
 mine_b2b 1
 wait_for "sp-lfa synced" 120 sh -c "[ \"\$(docker exec sp-lfa lncli --network=regtest getinfo | jq -r .synced_to_chain)\" = true ]"
-ensure_b2b_funds 3
+ensure_b2b_funds 4
 b2b -rpcwallet=lab sendtoaddress "$(la newaddress p2wkh | jq -r .address)" 2 >/dev/null
+# Core Lightning's splice-in below is funded from its wallet, which an earlier
+# scenario may have left with a small coin only (the hold scenario does).
+b2b -rpcwallet=lab sendtoaddress "$(cln newaddr | jq -r .bech32)" 1 >/dev/null
 mine_b2b 6
 wait_synced_a() { wait_for "sp-lfa synced" 120 sh -c "[ \"\$(docker exec sp-lfa lncli --network=regtest getinfo | jq -r .synced_to_chain)\" = true ]"; wait_for "sp-cln synced" 120 cln_synced; }
 wait_synced_a
