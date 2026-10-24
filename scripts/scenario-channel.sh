@@ -20,11 +20,21 @@ wait_for "lf1<->lf2 connected" 30 sh -c "$COMPOSE exec -T lf1 lncli --network=re
 pass "lf1 and lf2 are peers (both sent the networks list; both strict-compatible)"
 
 step "channel: open lf1 -> lf2 and confirm"
-lf1 openchannel --node_key="$lf2_pub" --local_amt=1000000 --push_amt=300000 >/dev/null
+# The lab may already hold channels between the two (from another scenario):
+# count from what is there now.
+B1=$(lf1 listchannels | jq '[.channels[] | select(.active)] | length')
+B2=$(lf2 listchannels | jq '[.channels[] | select(.active)] | length')
+BALL1=$(lf1 listchannels | jq '.channels | length')
+BF1=$(lf1 pendingchannels | jq '.pending_force_closing_channels | length')
+BF2=$(lf2 pendingchannels | jq '.pending_force_closing_channels | length')
+echo "  starting with: lf1 active $B1 (all $BALL1, force-closing $BF1), lf2 active $B2 (force-closing $BF2)"
+op=$(lf1 openchannel --node_key="$lf2_pub" --local_amt=1000000 --push_amt=300000)
+ftx=$(echo "$op" | jq -r .funding_txid)
 mine_b2b 6
-wait_for "channel active on lf1" 90 sh -c "[ \"\$($COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" = 1 ]"
-wait_for "channel active on lf2" 90 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" = 1 ]"
-cp=$(lf1 listchannels | jq -r '.channels[0].channel_point')
+wait_for "channel active on lf1" 90 sh -c "[ \"\$($COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" = $((B1+1)) ]"
+wait_for "channel active on lf2" 90 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" = $((B2+1)) ]"
+cp=$(lf1 listchannels | jq -r --arg t "$ftx" '.channels[] | select(.channel_point|startswith($t)) | .channel_point')
+[ -n "$cp" ] || fail "no channel point for $ftx"
 pass "channel $cp active on both sides"
 
 step "channel: pay lf1 -> lf2 with a lnbcrt invoice"
@@ -43,30 +53,32 @@ step "channel: cooperative close"
 lf1 closechannel --funding_txid="${cp%%:*}" --output_index="${cp##*:}" >/dev/null 2>&1 &
 sleep 3
 mine_b2b 6
-wait_for "close settled on lf1" 90 sh -c "[ \"\$($COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '.channels | length')\" = 0 ] && [ \"\$($COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.waiting_close_channels | length')\" = 0 ]"
+wait_for "close settled on lf1" 90 sh -c "[ \"\$($COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '.channels | length')\" = $BALL1 ] && [ \"\$($COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.waiting_close_channels | length')\" = 0 ]"
 wait
 pass "cooperative close confirmed"
 
 step "channel: open again, force close from lf2, sweep confirms"
 wait_for "lf1 synced" 120 lnd_synced lf1
 wait_for "lf2 synced" 120 lnd_synced lf2
-lf1 openchannel --node_key="$lf2_pub" --local_amt=800000 --push_amt=200000 >/dev/null
+op2=$(lf1 openchannel --node_key="$lf2_pub" --local_amt=800000 --push_amt=200000)
+ftx2=$(echo "$op2" | jq -r .funding_txid)
 mine_b2b 6
-wait_for "second channel active on lf2" 90 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" = 1 ]"
-cp2=$(lf2 listchannels | jq -r '.channels[] | select(.active) | .channel_point' | head -1)
+wait_for "second channel active on lf2" 90 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" = $((B2+1)) ]"
+cp2=$(lf2 listchannels | jq -r --arg t "$ftx2" '.channels[] | select(.channel_point|startswith($t)) | .channel_point')
+[ -n "$cp2" ] || fail "no channel point for $ftx2"
 # closechannel --force streams until the commitment confirms, so run it in
 # the background and wait for the commitment to reach the mempool before
 # mining, or the block may miss it.
 lf2 closechannel --force --funding_txid="${cp2%%:*}" --output_index="${cp2##*:}" >/dev/null 2>&1 &
 close_pid=$!
-wait_for "commitment broadcast" 60 sh -c "[ \"\$($COMPOSE exec -T knots-b2b bitcoin-cli -datadir=/data -rpcuser=lab -rpcpassword=lab getmempoolinfo | jq -r .size)\" != 0 ] || [ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.pending_force_closing_channels | length')\" != 0 ]"
+wait_for "commitment broadcast" 60 sh -c "[ \"\$($COMPOSE exec -T knots-b2b bitcoin-cli -datadir=/data -rpcuser=lab -rpcpassword=lab getmempoolinfo | jq -r .size)\" != 0 ] || [ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.pending_force_closing_channels | length')\" != $BF2 ]"
 mine_b2b 1
 wait "$close_pid" || true
 # lnd keeps the channel in waiting_close until the commitment has three
 # confirmations, then moves it to pending_force_closing.
 wait_for "close registered on lf2" 60 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '(.waiting_close_channels | length) + (.pending_force_closing_channels | length)')\" != 0 ]"
 mine_b2b 3
-wait_for "force close pending on lf2" 60 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.pending_force_closing_channels | length')\" != 0 ]"
+wait_for "force close pending on lf2" 60 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.pending_force_closing_channels | length')\" != $BF2 ]"
 pass "commitment confirmed; channel is force-closing on lf2"
 # Let the CSV delay pass and the sweeps confirm, a few blocks at a time so
 # the nodes broadcast their sweeps between blocks. The initiator assigns the
@@ -75,8 +87,8 @@ for i in $(seq 1 16); do
     mine_b2b 20
     sleep 2
 done
-wait_for "force close resolved on lf2" 240 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.pending_force_closing_channels | length')\" = 0 ]"
-wait_for "force close resolved on lf1" 240 sh -c "[ \"\$($COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.pending_force_closing_channels | length')\" = 0 ]"
+wait_for "force close resolved on lf2" 240 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.pending_force_closing_channels | length')\" -le $BF2 ]"
+wait_for "force close resolved on lf1" 240 sh -c "[ \"\$($COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 pendingchannels | jq '.pending_force_closing_channels | length')\" -le $BF1 ]"
 pass "force close from lf2 resolved on both sides after the CSV delay"
 
 step "channel: the sweeps of the force close opted into SIGHASH_UNIFIED"
