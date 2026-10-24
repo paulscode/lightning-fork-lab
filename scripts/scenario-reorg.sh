@@ -6,11 +6,30 @@ source "$(dirname "$0")/lib.sh"
 wait_for "lf1 synced" 120 lnd_synced lf1
 wait_for "lf2 synced" 120 lnd_synced lf2
 
+# at_tip SERVICE: the node reports the chain's best block.
+at_tip() {
+    [ "$(lncli_on "$1" getinfo 2>/dev/null | jq -r .block_hash)" = "$(b2b getbestblockhash)" ]
+}
+
+# On a long-lived lab chain the boundary reorg re-mines tens of thousands of
+# blocks: one generatetoaddress call for them all outlasts bitcoin-cli's
+# client timeout, and leaves the nodes a long walk to the new tip. Mine in
+# batches, letting the nodes catch up after each.
+REORG_BATCH=${REORG_BATCH:-1000}
 reorg_from() {
     local height=$1 depth=$2
     local old; old=$(b2b getblockhash "$height")
     b2b invalidateblock "$old" >/dev/null
-    mine_b2b "$depth"
+    local left=$depth n svc
+    while [ "$left" -gt 0 ]; do
+        n=$(( left < REORG_BATCH ? left : REORG_BATCH ))
+        mine_b2b "$n"
+        left=$(( left - n ))
+        [ "$left" -gt 0 ] || break
+        for svc in lf1 lf2; do
+            wait_for "$svc at $(b2b getblockcount) while re-mining" 1800 at_tip "$svc"
+        done
+    done
     local new; new=$(b2b getblockhash "$height")
     [ "$old" != "$new" ] || fail "no reorg happened at $height"
     local tip; tip=$(b2b getblockcount)
