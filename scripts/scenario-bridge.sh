@@ -108,6 +108,42 @@ wait_ready() {
     fail "the bridge is not ready: ${resp:-no answer}"
 }
 
+# Enabled is enough to take the operator's calls, such as setting the rate,
+# whatever the bridge refuses meanwhile.
+wait_enabled() {
+    local secs="${1:-120}" resp
+    for _ in $(seq 1 "$secs"); do
+        resp=$(bridge status 2>/dev/null || true)
+        if [ -n "$resp" ] && echo "$resp" | jq -e '.enabled == true' \
+            >/dev/null 2>&1; then
+
+            return 0
+        fi
+        sleep 1
+    done
+
+    fail "the bridge is not enabled: ${resp:-no answer}"
+}
+
+# After lf1 restarts, the payer's channels with it come back one by one: a
+# payment sent before they are active fails for want of balance.
+wait_channels_back() {
+    local secs="${1:-120}" key chans
+    key=$(lncli_on lf1 getinfo | jq -r .identity_pubkey)
+    for _ in $(seq 1 "$secs"); do
+        chans=$(lncli_on lf2 listchannels 2>/dev/null || true)
+        if echo "$chans" | jq -e --arg k "$key" \
+            '[.channels[] | select(.remote_pubkey == $k)] |
+             length > 0 and all(.active)' >/dev/null 2>&1; then
+
+            return 0
+        fi
+        sleep 1
+    done
+
+    fail "lf2's channels with lf1 are not all active again"
+}
+
 # The preimage a node holds for a payment it made, by payment hash in hex.
 paid_preimage() {
     lncli_on "$1" listpayments --max_payments 50 \
@@ -120,16 +156,16 @@ b64_to_hex() {
 }
 
 echo "== the bridge is ready to quote =="
-wait_ready 180
 # The amounts below assume the lab's rate of 1 BTC per BTCB2. A rate set at
-# runtime survives a restart, and the reverse direction's swap bounds are
-# converted at the rate in force when the bridge started, so put the rate back
-# and restart before going on.
-if ! bridge status | jq -e '.rate == 1' >/dev/null; then
-    lncli_on lf1 bridge setrate 1.0 >/dev/null
-    $COMPOSE restart lf1 >/dev/null 2>&1
-    wait_ready 180
-fi
+# runtime survives a restart, and one older than the bridge's ratemaxage is
+# refused, even at 1, until it is set again; the reverse direction's swap
+# bounds are converted at the rate in force when the bridge started. So set
+# the rate fresh, whatever is stored, and restart before going on.
+wait_enabled 180
+lncli_on lf1 bridge setrate 1.0 >/dev/null
+$COMPOSE restart lf1 >/dev/null 2>&1
+wait_ready 180
+wait_channels_back 120
 info=$(bridge info)
 echo "$info" | jq -e '[.directions[] | select(.open)] | length == 2' \
     >/dev/null || fail "not both directions open: $info"
