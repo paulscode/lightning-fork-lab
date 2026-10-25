@@ -16,18 +16,23 @@
 #   LND_REL_IMAGE  the previous release, which doesn't know the option
 #   CLN_IMAGE      the Core Lightning port with --independent-secrets
 #                  (privkeyio/lightning#48), built from a tree (any build:
-#                  --developer is a runtime option)
+#                  --developer is a runtime option); 5B-i' and 5C also need
+#                  privkeyio/lightning#66 (v26.06.9-blake2b.9 or later)
 #
-#   bash scripts/scenario-independent-secrets.sh [1 2 3 4 5a 5b 5d 6 7]
+#   bash scripts/scenario-independent-secrets.sh [1 2 3 4 5a 5b 5c 5d 6 7]
 #
 # 1 negotiation, 2 normal operation, 3 Core Lightning (non-shachain sender)
 # breaches and lnd punishes, 4 lnd (non-shachain sender) breaches and Core
 # Lightning punishes, 5 splice then breach (5a/5d lnd punishes, 5b Core
-# Lightning punishes), 6 an lnd tower punishes for an offline lnd, 7 a peer
-# setting 266 in init.
+# Lightning punishes, 5c a control without the add-on), 6 an lnd tower
+# punishes for an offline lnd, 7 a peer setting 266 in init.
 #
-# Not a failure, but reported (the NUDGE lines): Core Lightning's HTLC
-# penalty is refused at the 253 perkw floor (privkeyio/lightning#49).
+# 5B-i' and 5C restart Core Lightning while a splice is pending: before
+# privkeyio/lightning#66 it didn't watch the funding output the channel still
+# had after such a restart, so a commitment mined on it went unseen; both now
+# fail unless Core Lightning punishes. Not a failure, but reported (the NUDGE
+# lines): Core Lightning's HTLC penalty is refused at the 253 perkw floor
+# (privkeyio/lightning#49).
 #
 # A Core Lightning breach uses its dev-sign-last-tx (a commitment signed then,
 # broadcast later); an lnd breach restores a copy of its data taken earlier and
@@ -762,14 +767,17 @@ s5a() {
 	pass "5A-iii: lnd punished a post-splice state"
 }
 
-# presplice_cln LND_IMAGE "LND_FLAGS" "CLN_FLAGS": on a fresh chain, lnd
+# presplice_cln MODE LND_IMAGE "LND_FLAGS" "CLN_FLAGS": on a fresh chain, lnd
 # opens to Core Lightning, a copy of lnd's data is taken, payments, lnd
-# splices out, payments while the splice is pending; then, with Core Lightning
-# cut off from lnd only, lnd comes back on the copy and its revoked commitment
-# is mined on the old funding output. Core Lightning must punish it.
+# splices out, payments while the splice is pending; then lnd comes back on
+# the copy and its revoked commitment is mined on the old funding output.
+#   MODE=online   Core Lightning keeps running, cut off from lnd only
+#   MODE=restart  Core Lightning is stopped meanwhile, as a node restarting
+#                 with a splice pending would be
+# Prints "punished" or "missed".
 presplice_cln() {
-	local img=$1 lflags=$2 cflags=$3
-	local cpub cp stx btx cb0 i addr
+	local mode=$1 img=$2 lflags=$3 cflags=$4
+	local cpub cp stx btx cb0 i addr res
 	fresh_chain
 	start_lnd isec-l "$img" $lflags --protocol.splice
 	start_cln isec-c $cflags
@@ -777,25 +785,29 @@ presplice_cln() {
 	connect_lc isec-l isec-c
 	cpub=$(cid isec-c)
 	cp=$(lnd_open isec-l "$cpub" 1000000)
-	ev "channel $cp: lnd independent_secrets=$(lchan_by_point isec-l "$cp" | jq .independent_secrets), CLN $(cchan_by_txid isec-c "${cp%:*}" | jq -c .channel_type.names)"
+	ev "[$mode] channel $cp: lnd independent_secrets=$(lchan_by_point isec-l "$cp" | jq .independent_secrets), CLN $(cchan_by_txid isec-c "${cp%:*}" | jq -c .channel_type.names)"
 	pay_lc isec-l isec-c 200000
 	lnd_snapshot isec-l s5pre
 	connect_lc isec-l isec-c
 	wait_for "active" 60 sh -c "docker exec isec-l lncli --network=regtest listchannels --active_only | jq -e '.channels | length == 1'"
 	for i in 1 2 3 4; do pay_lc isec-l isec-c 20000; pay_cl isec-l isec-c 1000; done
-	# An address of a wallet that isn't loaded when the chain node restarts:
-	# the lab wallet would put a splice paying it back in the mempool.
+	# An address of a wallet that isn't loaded when the node restarts: the
+	# lab wallet would put a splice paying it back in the mempool.
 	K createwallet sink >/dev/null 2>&1 || K loadwallet sink >/dev/null
 	addr=$(K -rpcwallet=sink getnewaddress "" bech32); K unloadwallet sink >/dev/null
 	stx=$(lnd_splice isec-l "$cp" out --amt 200000 --addr "$addr")
 	for i in 1 2 3; do pay_lc isec-l isec-c 20000; pay_cl isec-l isec-c 1000; done
-	ev "splice-out $stx pending; CLN stores $(cstored isec-c "${cp%:*}") of lnd's secrets one by one; CLN state $(cchan_by_txid isec-c "${cp%:*}" | jq -r .state)"
+	ev "[$mode] splice-out $stx pending; CLN stores $(cstored isec-c "${cp%:*}") of lnd's secrets one by one; CLN state $(cchan_by_txid isec-c "${cp%:*}" | jq -r .state)"
 	cb0=$(cbal isec-c)
-	# Core Lightning reaches the chain over a network lnd isn't on.
-	docker network create isec-aux >/dev/null 2>&1 || true
-	docker network connect isec-aux isec-knots 2>/dev/null || true
-	docker network connect isec-aux isec-c
-	docker network disconnect $N isec-c
+	if [ "$mode" = online ]; then
+		# Core Lightning reaches the chain over a network lnd isn't on.
+		docker network create isec-aux >/dev/null 2>&1 || true
+		docker network connect isec-aux isec-knots 2>/dev/null || true
+		docker network connect isec-aux isec-c
+		docker network disconnect $N isec-c
+	else
+		docker stop isec-c >/dev/null
+	fi
 	docker stop isec-l >/dev/null
 	restart_knots
 	[ "$(K getrawmempool | jq length)" = 0 ] || fail "the splice is still in the mempool"
@@ -808,26 +820,39 @@ presplice_cln() {
 	btx=$(L isec-l pendingchannels | jq -r --arg c "$cp" '.waiting_close_channels[] | select(.channel.channel_point == $c) | .closing_txid')
 	# Mined at once, before anyone can replace it with the splice.
 	K generateblock "$(K -rpcwallet=lab getnewaddress)" "[\"$btx\"]" >/dev/null
-	ev "lnd's pre-splice revoked commitment $btx mined, spending $(K getrawtransaction "$btx" 1 | jq -r '.vin[0] | "\(.txid):\(.vout)"')"
+	ev "[$mode] lnd's pre-splice revoked commitment $btx mined, spending $(K getrawtransaction "$btx" 1 | jq -r '.vin[0] | "\(.txid):\(.vout)"')"
+	[ "$mode" = online ] || docker start isec-c >/dev/null
+	wait_for "isec-c RPC" 90 sh -c "docker exec isec-c lightning-cli --network=regtest --lightning-dir=/data getinfo"
 	sync_all
+	res=missed
 	for i in $(seq 1 12); do
-		cln_penalty_logged isec-c && break
+		if cln_penalty_logged isec-c; then res=punished; break; fi
 		sleep 5; mine 1
 	done
-	cln_penalty_logged isec-c || fail "no penalty from Core Lightning: $(cchan_by_txid isec-c "${cp%:*}" | jq -c '{state, status}')"
-	mine_until "CLN resolved" 150 cln_resolved_nudged isec-c "${cp%:*}"
-	mine 3
-	ev "  CLN: $(docker logs isec-c 2>&1 | grep -oE 'Resolved THEIR_REVOKED_UNILATERAL/[A-Z_]+ by our proposal OUR_PENALTY_TX' | sort | uniq -c | tr '\n' ';')"
-	ev "  penalty: $(justice_of "$btx" | tr '\n' ';'); CLN wallet +$(( $(cbal isec-c) - cb0 )) of 1000000"
-	[ $(( $(cbal isec-c) - cb0 )) -gt $(( 1000000 - 20000 )) ] || fail "CLN didn't take the channel"
+	if [ "$res" = punished ]; then
+		mine_until "CLN resolved" 150 cln_resolved_nudged isec-c "${cp%:*}"
+		mine 3
+		ev "[$mode]   CLN: $(docker logs isec-c 2>&1 | grep -oE 'Resolved THEIR_REVOKED_UNILATERAL/[A-Z_]+ by our proposal OUR_PENALTY_TX' | sort | uniq -c | tr '\n' ';')"
+		ev "[$mode]   penalty: $(justice_of "$btx" | tr '\n' ';'); CLN wallet +$(( $(cbal isec-c) - cb0 )) of 1000000"
+		[ $(( $(cbal isec-c) - cb0 )) -gt $(( 1000000 - 20000 )) ] || res=short
+	else
+		ev "[$mode]   CLN after $(( $(tip) - $(K getrawtransaction "$btx" 1 | jq -r .confirmations) + 1 )).. $(tip): $(cchan_by_txid isec-c "${cp%:*}" | jq -c '{state, status}')"
+	fi
+	echo "$res" > /tmp/isec-work/presplice-result
 }
 
 s5b() {
 	step "5B. lnd (non-shachain sender) breaches around its splices; Core Lightning punishes"
 
-	step "5B-i. a pre-splice revoked state on the old funding while lnd's splice-out is pending"
-	presplice_cln "$LND_INT_IMAGE" "$INT" "--independent-secrets"
+	step "5B-i. a pre-splice revoked state on the old funding while lnd's splice-out is pending; Core Lightning running"
+	presplice_cln online "$LND_INT_IMAGE" "$INT" "--independent-secrets"
+	[ "$(cat /tmp/isec-work/presplice-result)" = punished ] || fail "5B-i: Core Lightning $(cat /tmp/isec-work/presplice-result)"
 	pass "5B-i: CLN punished a pre-splice state on the old funding"
+
+	step "5B-i'. the same, Core Lightning restarted while the splice is pending"
+	presplice_cln restart "$LND_INT_IMAGE" "$INT" "--independent-secrets"
+	[ "$(cat /tmp/isec-work/presplice-result)" = punished ] || fail "5B-i': Core Lightning $(cat /tmp/isec-work/presplice-result) after a restart (needs privkeyio/lightning#66)"
+	pass "5B-i': CLN punished a pre-splice state after restarting with the splice pending"
 
 	step "5B-ii. a revoked post-splice state on the new funding"
 	fresh_chain
@@ -866,6 +891,16 @@ s5b() {
 	pass "5B-ii: CLN punished a post-splice state"
 }
 
+# 5C: the restart case on a channel without the add-on (the release
+# behaviour of both sides), so a failure of 5B-i' can be told apart from one
+# caused by option_independent_secrets.
+s5c() {
+	step "5C. 5B-i' on a channel without the add-on"
+	presplice_cln restart "$LND_IMAGE" "" ""
+	[ "$(cat /tmp/isec-work/presplice-result)" = punished ] || fail "5C: Core Lightning $(cat /tmp/isec-work/presplice-result) after a restart (needs privkeyio/lightning#66)"
+	pass "5C: CLN punished a pre-splice state after a restart, without the add-on"
+}
+
 # 5D: lnd restarts while its splice is pending, then Core Lightning (the
 # non-shachain sender) mines a pre-splice revoked state on the old funding.
 s5d() {
@@ -892,7 +927,7 @@ s5d() {
 	lnd_takes isec-l "$btx" 1000000 0
 	pass "5D: lnd punished a pre-splice state after restarting with the splice pending"
 }
-s5() { s5a; s5b; s5d; }
+s5() { s5a; s5b; s5c; s5d; }
 
 backups_settled() { L "$1" wtclient stats | jq -e '.num_pending_backups == 0' >/dev/null; }
 tower_up() { L isec-t tower info | jq -e '.uris | length > 0' >/dev/null; }
