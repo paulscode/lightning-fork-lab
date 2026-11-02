@@ -45,6 +45,8 @@ LND_IMAGE=${LND_IMAGE:-isec-lnd:pr}
 LND_INT_IMAGE=${LND_INT_IMAGE:-isec-lnd:pr-int}
 LND_REL_IMAGE=${LND_REL_IMAGE:-paulscode/lightning-fork:0.21.4-beta-blake2b.21}
 CLN_IMAGE=${CLN_IMAGE:-isec-cln:pr48}
+# Preimages of held HTLCs and per-run markers; nothing else creates it.
+mkdir -p /tmp/isec-work
 # An integration build has anchors off unless asked, unlike a release build.
 INT="--protocol.anchors --protocol.independent-secrets --dev.independent-secrets-sender"
 EVID=${EVID:-results/independent-secrets}
