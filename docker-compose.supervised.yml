@@ -68,7 +68,7 @@ services:
       - lf3-data:/root/.lnd
 
   lf3-sha256:
-    image: lightninglabs/lnd:v0.21.4-beta
+    image: lightninglabs/lnd:v0.21.6-beta
     restart: unless-stopped
     # As on Umbrel: lnd closes its databases on the way out.
     stop_grace_period: 1m
@@ -100,6 +100,7 @@ services:
           --externalip=lf3-sha256:9739 \
           --tlsextradomain=lf3-sha256 \
           --alias=lf3-sha256 \
+          --routing.assumechanvalid \
           --wallet-unlock-password-file="$$pw" \
           --wallet-unlock-allow-create &
         lnd=$$!

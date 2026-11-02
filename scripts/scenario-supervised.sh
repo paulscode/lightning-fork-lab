@@ -219,7 +219,7 @@ docker rm -f lf3-restore >/dev/null 2>&1 || true
 docker volume rm -f lf3-restore-data >/dev/null 2>&1 || true
 
 docker run -d --name lf3-restore --network lightning-fork-lab_lab \
-    -v lf3-restore-data:/root/.lnd lightninglabs/lnd:v0.21.4-beta \
+    -v lf3-restore-data:/root/.lnd lightninglabs/lnd:v0.21.6-beta \
     --bitcoin.regtest --bitcoin.node=bitcoind \
     --bitcoind.rpchost=bitcoind-sha:18443 --bitcoind.rpcuser=lab \
     --bitcoind.rpcpass=lab \
