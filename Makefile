@@ -49,6 +49,10 @@ down:
 
 nuke:
 	$(COMPOSE) --profile refuse --profile cln down -v
+	# The supervised bridge's nodes and their volume are in their own file;
+	# left behind they keep wallets from the chains this just wiped.
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.supervised.yml rm -sfv lf3 lf3-sha256
+	docker volume rm -f lightning-fork-lab_lf3-data lf3-restore-data
 	rm -rf results/*.log
 	@echo "All lab state wiped."
 

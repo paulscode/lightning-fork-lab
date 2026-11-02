@@ -27,4 +27,9 @@ lf1 openchannel --node_key="$lf2_pub" --local_amt=1000000 --push_amt=300000 >/de
 mine_b2b 6
 wait_for "channel active on lf1" 90 sh -c "[ \"\$($COMPOSE exec -T lf1 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" = 1 ]"
 wait_for "channel active on lf2" 90 sh -c "[ \"\$($COMPOSE exec -T lf2 lncli --network=regtest --rpcserver=127.0.0.1:10009 listchannels | jq '[.channels[] | select(.active)] | length')\" = 1 ]"
+# Active is not enough to pay over it: pathfinding reads the channel from the
+# graph, which it reaches only once both sides have exchanged channel_ready.
+for n in lf1 lf2; do
+	wait_for "the channel in $n's graph" 90 sh -c "[ \"\$($COMPOSE exec -T $n lncli --network=regtest --rpcserver=127.0.0.1:10009 describegraph | jq '.edges | length')\" -ge 1 ]"
+done
 pass "lf1 and lf2 share an active channel"
