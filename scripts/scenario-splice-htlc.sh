@@ -52,6 +52,9 @@ p2=$(l2 getinfo | jq -r .identity_pubkey)
 lf connect "$p2@sp-lf2:9735" >/dev/null; sleep 2
 lf openchannel --node_key "$p2" --local_amt 1000000 --push_amt 300000 --sat_per_vbyte 2 >/dev/null
 mine_b2b 6; both_synced; active
+# Active in listchannels comes before the router can use the channel: a
+# payment sent at once fails with insufficient_balance.
+wait_for "a route to sp-lf2" 60 sh -c "docker exec sp-lf lncli --network=regtest --rpcserver=127.0.0.1:10009 queryroutes --dest $p2 --amt 40000 >/dev/null 2>&1"
 pass "a channel of 1,000,000 sat"
 
 step "htlc: an HTLC of 40,000 held, then sp-lf adds 250,000"
